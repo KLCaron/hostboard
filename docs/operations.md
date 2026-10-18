@@ -2,7 +2,7 @@
 
 ## Distribution
 
-Stable release image: `ghcr.io/klcaron/hostboard:0.5.2`, Linux amd64/arm64. Each `vX.Y.Z` Git tag must match `package.json`. Publishing runs tests before building, and refuses an existing version tag. Do not move Git tags or republish an existing version. GHCR allows administrators to change tags, so use the published **sha256 manifest digest** for immutable deployments. The GitHub Release records that digest; build metadata/SBOM/provenance are attached to the image. No moving `latest` tag is published. Maintainers may dispatch a verified `candidate-<commit>` image for pre-release acceptance; it is not a stable release. Only reviewed stable semantic versions are released.
+Stable release image: `ghcr.io/klcaron/hostboard:0.5.3`, Linux amd64/arm64. Each `vX.Y.Z` Git tag must match `package.json`. Publishing runs tests before building, and refuses an existing version tag. Do not move Git tags or republish an existing version. GHCR allows administrators to change tags, so use the published **sha256 manifest digest** for immutable deployments. The GitHub Release records that digest; build metadata/SBOM/provenance are attached to the image. No moving `latest` tag is published. Maintainers may dispatch a verified `candidate-<commit>` image for pre-release acceptance; it is not a stable release. Only reviewed stable semantic versions are released.
 
 Use `HOSTBOARD_IMAGE=ghcr.io/klcaron/hostboard@sha256:...` in `.env` to pin the complete multi-platform release. Keep a copy of the selected source release alongside your deployment files to satisfy source availability and recover the matching helpers. No automatic updater is installed.
 
@@ -14,7 +14,7 @@ Run from the release directory, preserving its `.env`, `config`, `private`, and 
 
 ```sh
 ./scripts/manage.sh backup ./backups/manual
-./scripts/manage.sh upgrade ghcr.io/klcaron/hostboard:0.5.2 ./backups/before-upgrade
+./scripts/manage.sh upgrade ghcr.io/klcaron/hostboard:0.5.3 ./backups/before-upgrade
 ```
 
 Substitute the intended newer version/digest for an actual upgrade. The helper first makes a consistent SQLite online backup plus `.env`, Agent/bootstrap configuration, private authentication/SMTP configuration, and image metadata. Then it pulls the image, persists that reference in `.env`, recreates Hostboard, and waits up to two minutes for container health. Database initialization/migrations occur during startup. Review the release's schema/rollback notes before upgrading. Keep a second copy of backups off-host; credentials are plaintext within these restricted-permission directories. Use encrypted off-host storage appropriate for your environment.
@@ -22,6 +22,8 @@ Substitute the intended newer version/digest for an actual upgrade. The helper f
 Do not copy only `monitor.sqlite` while it is running: SQLite WAL may contain committed data. Use the helper's backup API. The database contains sample references, incidents, service definitions, preferences, audit and delivery state. Netdata metric history remains at each Agent. Browser-local layout/preferences require a separate browser profile backup/export.
 
 v0.5.2 migrates schema **1 → 2** transactionally, preserving observations as evaluation generation 1. The sample identity index is rebuilt: allow additional disk space approximately equal to the sample table during migration. Older images refuse schema 2. Release acceptance exercises a genuine v0.5.1 → v0.5.2 migration and a paired downgrade to v0.5.1. A schema guard refuses unknown newer versions, but this is not a substitute for a backup.
+
+v0.5.3 adds schema **2 → 3** in an ordered transaction. It adds historical target metadata without rebuilding observations. Existing generations remain explicitly `legacy-unavailable`: current configuration cannot prove their original definitions. Fresh generations retain sanitized metadata. Both schema-1 and actual schema-2 release fixtures are tested. v0.5.2 refuses schema 3; an image-only downgrade is unsupported. Restore its schema-2 pre-upgrade checkpoint, matching private/configuration files and saved image together.
 
 ## Paired restore
 
@@ -39,7 +41,7 @@ docker compose run --rm --no-deps -T --entrypoint node hostboard dist/server/ser
 docker compose up -d --wait
 ```
 
-The v0.5.2 offline command accepts schema 1 and 2. Use the saved v0.5.1 image only with its schema-1 checkpoint. For an older release without the maintenance CLI, use its matching restore instructions and paired pre-upgrade database. Never delete WAL files from a running database. Do not run restore while another Hostboard process has the same data directory open.
+The v0.5.3 offline command accepts schemas 1, 2 and 3. Use the saved v0.5.1 image only with its schema-1 checkpoint. For an older release without the maintenance CLI, use its matching restore instructions and paired pre-upgrade database. Never delete WAL files from a running database. Do not run restore while another Hostboard process has the same data directory open.
 
 ## Existing SSH / host-network deployments
 
@@ -59,6 +61,6 @@ v0.5.2 databases cannot be opened by v0.5.1. Downgrade with the schema-1 **pre-u
 
 ## Monitoring capacity and history
 
-Eight probes run concurrently, at most one per check. The interval is a delay after completion; oldest-due checks receive capacity first. Execution time does not reset consecutive failure evidence. A missing observation, scheduler interruption or disabled check is unknown monitoring time. Overdue probe starts keep monitor health unavailable even immediately after fresh responses; overload also makes observations stale. It does not fabricate a service failure. Tune intervals to the number and duration of checks rather than expecting 100 slow checks to run every ten seconds.
+Eight probes run concurrently, at most one per check. The interval is a delay after completion; oldest-due checks receive capacity first. Ordinary request execution time does not reset consecutive failure evidence. A scheduling heartbeat detects gaps longer than five seconds using wall and monotonic clocks, including pauses during requests and callbacks delivered before a resumed scheduler tick. All results spanning an interruption become unknown; unconfirmed evidence resets, confirmed incidents retain their identity and receive a monitoring-gap marker. Coverage stops at the last observed scheduling opportunity and health remains unavailable until fresh trustworthy observations arrive. Timer jitter within five seconds is tolerated; this is not continuous observation of the remote service. A missing observation, scheduler interruption or disabled check is unknown monitoring time. Overdue probe starts keep monitor health unavailable even immediately after fresh responses; overload also makes observations stale. It does not fabricate a service failure. Tune intervals to the number and duration of checks rather than expecting 100 slow checks to run every ten seconds.
 
 Daily histories use linear bucket processing, a shared five-second cache, and yield between checks. Current state and health are read directly from observations. `/api/system` does not calculate trends. Retention deletion is indexed and limited to 5000 rows per scheduler tick. The default 30-day, 100-check, ten-second configuration can retain about 25.9 million rows; provision disk accordingly. A 365-day setting can exceed 315 million rows. The count limit is not a promise that every interval is achievable under every timeout/retention setting. Incidents/outbox history are retained indefinitely; SQLite reuses deleted pages and does not automatically shrink its file.

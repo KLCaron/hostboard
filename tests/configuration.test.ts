@@ -601,3 +601,16 @@ test("general and presentation updates preserve in-flight unrelated checks; disa
   assert.equal(m.db.prepare("SELECT COUNT(*) n FROM samples WHERE ok IS NULL").get()?.n, 1, "disable records an explicit unknown boundary");
   assert.equal(m.view().checks[0].state, "disabled");
 });
+
+test("historical target metadata requires administrator authorization and omits URL/content/header secrets", async (t) => {
+  const f = await fixture(t);
+  assert.equal((await f.call("admin/checks/existing/history?generation=1", undefined, { token: "forged" })).status, 403);
+  const response = await f.call("admin/checks/existing/history?generation=1");
+  assert.equal(response.status, 200);
+  const history = await response.json();
+  assert.equal(history.metadataStatus, "available");
+  assert.equal(history.targetMetadata.target, "http://127.0.0.1");
+  assert.equal(history.generations[0].targetMetadata.name, "Existing");
+  assert.equal((await f.call("admin/checks/existing/history?generation=0")).status, 400);
+  assert.equal((await f.call("admin/checks/existing/history?generation=999")).status, 404);
+});

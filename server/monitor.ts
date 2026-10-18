@@ -52,6 +52,8 @@ export class Monitor {
   >();
   private stopped = false;
   private lastTick = 0;
+  private heartbeat?: { wall: number; monotonic: number };
+  private interruption = 0;
   private lastPrune = 0;
   private storageError = false;
   disabled = new Set<string>();
@@ -71,6 +73,10 @@ export class Monitor {
       mkdirSync(path.dirname(filename), { recursive: true, mode: 0o700 });
     this.db =
       typeof filename === "string" ? new DatabaseSync(filename) : filename;
+    if (Number(this.db.prepare("PRAGMA user_version").get()?.user_version) > 3)
+      throw Error(
+        "Monitoring database was created by a newer Hostboard release",
+      );
     this.db
       .exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000;
       CREATE TABLE IF NOT EXISTS metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -143,15 +149,21 @@ export class Monitor {
         if (changed) {
           this.db
             .prepare(
-              "UPDATE check_generations SET endedAt=? WHERE checkId=? AND generation=?",
+              "UPDATE check_generations SET endedAt=?,supersededReason='Evaluation configuration changed' WHERE checkId=? AND generation=?",
             )
             .run(now, check.id, previous!.generation);
         }
         this.db
           .prepare(
-            "INSERT OR IGNORE INTO check_generations(checkId,generation,fingerprint,startedAt) VALUES(?,?,?,?)",
+            "INSERT OR IGNORE INTO check_generations(checkId,generation,fingerprint,startedAt,targetMetadata) VALUES(?,?,?,?,?)",
           )
-          .run(check.id, generation, fingerprint, now);
+          .run(
+            check.id,
+            generation,
+            fingerprint,
+            now,
+            JSON.stringify(targetMetadata(check)),
+          );
         if (old && changed) {
           this.delayed.delete(check.id);
           this.db
@@ -629,9 +641,60 @@ export class Monitor {
       if (rows.length) await this.dispatch(now, budget - rows.length);
     }
   }
+  // Probe duration is not scheduler delay. Check this both on the one-second
+  // heartbeat and before consuming a result: overdue socket/timeout callbacks
+  // can run before the first resumed scheduler tick. Wall time catches suspend
+  // on clocks whose monotonic source excludes sleep; monotonic catches stalls
+  // even if the wall clock moves backwards. Allow four seconds of timer jitter.
+  private observeScheduling(now = seconds()) {
+    const monotonic = performance.now() / 1000;
+    const previous = this.heartbeat;
+    this.heartbeat = { wall: now, monotonic };
+    if (
+      !previous ||
+      Math.max(now - previous.wall, monotonic - previous.monotonic) <= 5
+    )
+      return;
+    this.interruption++;
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      for (const check of this.config.checks) {
+        if (this.disabled.has(check.id)) continue;
+        // End coverage at the last known scheduling opportunity, never invent
+        // observations in the interval during which the process was absent.
+        this.db
+          .prepare(
+            "INSERT OR IGNORE INTO samples(checkId,time,ok,ms,interval,generation) VALUES(?,?,NULL,NULL,?,(SELECT generation FROM check_evaluation WHERE id=?))",
+          )
+          .run(
+            check.id,
+            Math.min(now, previous.wall + 0.000001),
+            check.intervalSeconds,
+            check.id,
+          );
+        this.db
+          .prepare(
+            "UPDATE incidents SET monitoringGap=1 WHERE id=(SELECT active FROM checks WHERE id=?)",
+          )
+          .run(check.id);
+        this.db
+          .prepare(
+            "UPDATE checks SET failures=0,firstFailure=NULL,ok=NULL,ms=NULL,reason='Monitoring scheduling interrupted' WHERE id=?",
+          )
+          .run(check.id);
+        this.delayed.add(check.id);
+      }
+      this.db.exec("COMMIT");
+      this.histories.clear();
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
   start() {
     const tick = () => {
       if (this.stopped) return;
+      this.observeScheduling();
       this.lastTick = seconds();
       if (this.lastTick - this.lastPrune > 3600) {
         const pruned = this.db
@@ -670,6 +733,7 @@ export class Monitor {
         this.running.add(check.id);
         const epoch = this.epochs.get(check.id);
         const startedAt = this.lastTick;
+        const interruption = this.interruption;
         void probe(check, this.policy)
           .then((result) => {
             if (
@@ -677,9 +741,17 @@ export class Monitor {
               epoch === this.epochs.get(check.id) &&
               !this.disabled.has(check.id)
             ) {
+              this.observeScheduling();
               this.record(
                 this.config.checks.find((c) => c.id === check.id)!,
-                result,
+                interruption === this.interruption
+                  ? result
+                  : {
+                      ok: null,
+                      responseMs: null,
+                      reason:
+                        "Monitoring interrupted during request; result unavailable",
+                    },
                 seconds(),
                 startedAt,
               );
@@ -805,19 +877,31 @@ export class Monitor {
       trend,
     };
   }
-  historyFor(id: string, generation: number, now = seconds()) {
+  historyFor(
+    id: string,
+    generation: number,
+    now = seconds(),
+    includeTarget = false,
+  ) {
     const check = this.config.checks.find((c) => c.id === id);
     const revision = this.db
       .prepare(
-        "SELECT generation,startedAt,endedAt FROM check_generations WHERE checkId=? AND generation=?",
+        `SELECT generation,startedAt,endedAt${includeTarget ? ",targetMetadata,supersededReason" : ""} FROM check_generations WHERE checkId=? AND generation=?`,
       )
       .get(id, generation) as
-      | { generation: number; startedAt: number | null; endedAt: number | null }
+      | {
+          generation: number;
+          startedAt: number | null;
+          endedAt: number | null;
+          targetMetadata?: string | null;
+          supersededReason?: string | null;
+        }
       | undefined;
     if (!check || !revision) return null;
     return {
       checkId: id,
       ...revision,
+      ...(includeTarget ? historicalMetadata(revision) : {}),
       ...this.history(
         check,
         Math.min(now, revision.endedAt ?? now),
@@ -825,12 +909,15 @@ export class Monitor {
       ),
     };
   }
-  generations(id: string) {
-    return this.db
+  generations(id: string, includeTarget = false) {
+    const rows = this.db
       .prepare(
-        "SELECT generation,startedAt,endedAt FROM check_generations WHERE checkId=? ORDER BY generation",
+        `SELECT generation,startedAt,endedAt${includeTarget ? ",targetMetadata,supersededReason" : ""} FROM check_generations WHERE checkId=? ORDER BY generation`,
       )
       .all(id);
+    return includeTarget
+      ? rows.map((row) => ({ ...row, ...historicalMetadata(row) }))
+      : rows;
   }
   // Yield between checks; concurrent clients share one short-lived history computation.
   // Current states always come directly from observations, independently of this cache.
@@ -1000,4 +1087,43 @@ export class Monitor {
       retentionDays: this.preferences?.retention.sampleDays ?? 30,
     };
   }
+}
+
+// Historical definitions are administrator-only. HTTP paths and queries can
+// contain arbitrary credentials, so never try to recognize secrets by name.
+// Content match values and header/environment definitions are also omitted.
+function targetMetadata(check: CheckConfig) {
+  return {
+    name: check.name,
+    hostId: check.hostId,
+    protocol: check.type,
+    target:
+      check.type === "http"
+        ? new URL(check.url).origin
+        : `${check.address}:${check.port}`,
+    ...(check.type === "http"
+      ? {
+          pathAndQuery: "omitted",
+          expectedStatuses: check.expectedStatuses,
+          contentMatchConfigured: !!check.expectedContent,
+          followRedirects: check.followRedirects,
+          watchdogHistory: check.watchdogHistory,
+        }
+      : {}),
+    intervalSeconds: check.intervalSeconds,
+    timeoutMs: check.timeoutMs,
+    failureThreshold: check.failureThreshold,
+  };
+}
+function historicalMetadata(row: { targetMetadata?: unknown }) {
+  return {
+    metadataStatus:
+      typeof row.targetMetadata === "string"
+        ? "available"
+        : "legacy-unavailable",
+    targetMetadata:
+      typeof row.targetMetadata === "string"
+        ? JSON.parse(row.targetMetadata)
+        : null,
+  };
 }

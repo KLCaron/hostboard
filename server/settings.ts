@@ -73,7 +73,7 @@ export class Configuration {
     const schema = this.db.prepare("PRAGMA user_version").get() as {
       user_version: number;
     };
-    if (schema.user_version > 2) {
+    if (schema.user_version > 3) {
       this.db.close();
       throw Error(
         "Configuration database was created by a newer Hostboard release",

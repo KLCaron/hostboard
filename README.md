@@ -1,6 +1,6 @@
 # Hostboard
 
-> Use v0.5.2 for the monitoring reliability fixes. The initial v0.5.0 image has a local-login defect; v0.5.1 fixes it while retaining strict CSRF protection. Existing Cloudflare Access deployments are unaffected.
+> Use v0.5.3 for the monitoring reliability fixes. The initial v0.5.0 image has a local-login defect; v0.5.1 fixes it while retaining strict CSRF protection. Existing Cloudflare Access deployments are unaffected.
 
 A self-hosted dashboard for servers monitored by **Netdata Agents**. View live metrics, historical charts, Docker resources, Netdata alerts, service availability, and persistent incidents in one place.
 
@@ -22,7 +22,7 @@ Requires Linux, Git, Docker Engine with Compose v2, and at least one reachable N
 ```sh
 git clone https://github.com/KLCaron/hostboard.git
 cd hostboard
-git checkout v0.5.2
+git checkout v0.5.3
 ./scripts/setup.sh
 ./scripts/setup.sh --check
 docker compose up -d --wait
@@ -73,7 +73,7 @@ SMTP is optional. Configure `private/smtp.json` during setup or from the [SMTP e
 ```sh
 ./scripts/manage.sh backup ./backups/manual
 # After reviewing a newer release, substitute its exact version or digest:
-./scripts/manage.sh upgrade ghcr.io/klcaron/hostboard:0.5.2 ./backups/before-upgrade
+./scripts/manage.sh upgrade ghcr.io/klcaron/hostboard:0.5.3 ./backups/before-upgrade
 # Restore the paired image, configuration, and database if necessary:
 ./scripts/manage.sh rollback ./backups/before-upgrade
 ```

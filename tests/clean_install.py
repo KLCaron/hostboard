@@ -44,6 +44,8 @@ def main():
     with tempfile.TemporaryDirectory(prefix='hostboard-clean-') as directory:
         root = Path(directory) / 'install'
         subprocess.run(['git', 'clone', '--quiet', '--no-hardlinks', str(ROOT), str(root)], check=True)
+        # Exercise the candidate lifecycle validator before a release commit too.
+        shutil.copy2(ROOT/'scripts/backup_paths.py', root/'scripts/backup_paths.py')
         assert not (root / '.env').exists() and not (root / 'private').exists()
         port, registry_port = free_port(), free_port()
         project = 'hb-test-' + secrets.token_hex(4)
@@ -205,12 +207,13 @@ def main():
             login()
             assert api('/api/admin/config')[1]['checks'][0]['id']==check_id
             with sqlite3.connect(root/'backups/before-upgrade/monitor.sqlite') as db:
-                assert db.execute('pragma user_version').fetchone()[0]==1
+                previous_schema=db.execute('pragma user_version').fetchone()[0]
+                assert previous_schema in (1,2)
                 old_samples=db.execute('select count(*) from samples').fetchone()[0]
             with sqlite3.connect(external_data/'monitor.sqlite') as db:
-                assert db.execute('pragma user_version').fetchone()[0]==2
+                assert db.execute('pragma user_version').fetchone()[0]==3
                 assert db.execute('select count(*) from samples where generation=1').fetchone()[0]>=old_samples
-            print('PASS: real preserved v0.5.1 image/schema1 to corrected image/schema2 migration with retained observations.',flush=True)
+            print(f'PASS: real preserved image/schema{previous_schema} to corrected image/schema3 migration with retained observations.',flush=True)
             # Create a real outage/incident, observe unavailable Agent, then restore.
             compose('stop','fixture')
             for _ in range(25):
@@ -231,7 +234,7 @@ def main():
             assert saved_image in (root/'.env').read_text()
             assert docker('inspect','--format','{{.Image}}',compose('ps','-q','hostboard',capture=True).stdout.strip(),capture=True).stdout.strip()==saved_image
             with sqlite3.connect(external_data/'monitor.sqlite') as db:
-                assert db.execute('pragma user_version').fetchone()[0]==1
+                assert db.execute('pragma user_version').fetchone()[0]==previous_schema
             compose('start','fixture')
             print('PASS: clean clone, image installation, database initialization, Agent connection, authorization/CSRF, check creation, recreation, image pull/upgrade, private backup, incident recovery, paired rollback, and unavailable-Agent handling.', flush=True)
         finally:

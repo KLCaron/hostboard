@@ -74,6 +74,19 @@ export function configAPI(
     res.json({ admin: !!(await auth.identity(req)), configured: !!admin, mode: admin?.mode ?? "cloudflare" }),
   );
   router.use("/admin", auth.guard, express.json({ limit: "24kb" }));
+  router.get("/admin/checks/:id/history", (req, res) => {
+    const generation = req.query.generation;
+    if (typeof generation !== "string" || !/^[1-9]\d{0,8}$/.test(generation)) {
+      res.status(400).json({ error: "Choose a historical generation" });
+      return;
+    }
+    const history = monitor.historyFor(req.params.id, Number(generation), undefined, true);
+    if (!history) {
+      res.status(404).json({ error: "Unknown check generation" });
+      return;
+    }
+    res.json({ ...history, generations: monitor.generations(req.params.id, true) });
+  });
   router.get("/admin/config", (_req, res) =>
     res.json({
       revision: store.revision(),

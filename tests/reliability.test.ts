@@ -176,7 +176,7 @@ test("HB-004/005 migration preserves samples; revisions, renames, disable, archi
   assert.equal(
     (db.prepare("PRAGMA user_version").get() as { user_version: number })
       .user_version,
-    2,
+    3,
   );
   assert.equal(m.view(1000).checks[0].lastSuccessfulAt, 1000);
   const renamed = {
@@ -504,4 +504,65 @@ test("adversarial: archive cancels an in-flight notification and cannot turn ret
     /Monitoring discontinued/,
   );
   m.db.close();
+});
+
+test("scheduler interruption between probes clears every unconfirmed streak and preserves unknown coverage; timer jitter is tolerated", async () => {
+  let now = 1000000,
+    tick!: () => void;
+  const realNow = Date.now,
+    realInterval = globalThis.setInterval;
+  const server = http.createServer((_req, res) => {
+    res.statusCode = 503;
+    res.end("failure");
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = (server.address() as import("node:net").AddressInfo).port;
+  const c = { ...base, url: `http://127.0.0.1:${port}`, notify: false };
+  Date.now = () => now * 1000;
+  globalThis.setInterval = ((fn: () => void) => {
+    tick = fn;
+    return 0;
+  }) as unknown as typeof setInterval;
+  const m = new Monitor(config([c]), ":memory:", null, now);
+  const settle = async () => {
+    for (
+      let i = 0;
+      i < 1000 && (m as unknown as { running: Set<string> }).running.size;
+      i++
+    )
+      await turn();
+    assert.equal((m as unknown as { running: Set<string> }).running.size, 0);
+  };
+  try {
+    m.start();
+    await settle();
+    now += 4;
+    tick(); // delayed tick, inside the explicit jitter tolerance
+    assert.equal(m.view(now).checks[0].failures, 1);
+    assert.equal(
+      m.db.prepare("SELECT count(*) n FROM samples WHERE ok IS NULL").get()?.n,
+      0,
+    );
+    now += 20;
+    tick(); // no active request, genuine lost opportunities
+    assert.equal(m.healthy(now), false);
+    assert.equal(m.view(now).checks[0].failures, 0);
+    await settle();
+    assert.equal(m.view(now).checks[0].failures, 1);
+    assert.equal(m.view(now).incidents.length, 0);
+    const nullSample = m.db
+      .prepare("SELECT time FROM samples WHERE ok IS NULL")
+      .get()!;
+    assert(
+      Number(nullSample.time) < now - 19,
+      "unknown starts at the last heartbeat, not only on resumption",
+    );
+  } finally {
+    m.stop();
+    Date.now = realNow;
+    globalThis.setInterval = realInterval;
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    m.db.close();
+  }
 });
