@@ -1,3 +1,4 @@
+import { isIP } from 'node:net';
 import { readFileSync } from 'node:fs';
 import { z } from 'zod';
 const HostSchema = z.object({
@@ -15,6 +16,7 @@ const HostSchema = z.object({
     );
   }, 'Use an HTTP(S) Agent origin without credentials or a path'),
   node: z.string().regex(/^[a-zA-Z0-9_.:-]{1,128}$/),
+  addresses: z.array(z.string().refine(v => !!isIP(v))).min(1).max(20).optional(),
   tokenEnv: z
     .string()
     .regex(/^[A-Z_][A-Z0-9_]*$/)
@@ -33,6 +35,7 @@ export function loadConfig() {
   );
 }
 export function privateBind(address: string) {
+  if (!isIP(address)) return false;
   return (
     address === '127.0.0.1' ||
     address === '::1' ||

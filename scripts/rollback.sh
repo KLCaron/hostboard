@@ -9,6 +9,14 @@ else
   release=$(cat "$root/previous-release")
 fi
 [[ -d "$release" && "$release" == "$root/releases/"* ]] || { echo 'Previous release not found' >&2; exit 1; }
+# Only schema v1 is verified with v0.4.1/v0.5.0. A future migration must use
+# a paired pre-upgrade database; never blindly open it with older code.
+python3 - "$root/data/monitor.sqlite" <<'PYSCHEMA'
+import sqlite3,sys
+with sqlite3.connect(sys.argv[1]) as db:
+    if db.execute('PRAGMA user_version').fetchone()[0] != 1:
+        raise SystemExit('Use a paired database/image restore for this schema')
+PYSCHEMA
 # Preserve all current configuration and history before older code can touch SQLite.
 python3 - "$root/data/monitor.sqlite" "$root/data/monitor.before-rollback-$(date -u +%Y%m%dT%H%M%SZ).sqlite" <<'PYBACKUP'
 import sqlite3,sys
@@ -17,6 +25,10 @@ with sqlite3.connect(sys.argv[1]) as source,sqlite3.connect(sys.argv[2]) as dest
 PYBACKUP
 export HOSTBOARD_TAG=$(basename "$release")
 cd "$release"
-docker compose --env-file "$root/.env" up -d --no-build
+if [[ -f deploy/compose.host.yaml ]]; then
+  docker compose -f deploy/compose.host.yaml --project-directory . --env-file "$root/.env" up -d --no-build
+else
+  docker compose --env-file "$root/.env" up -d --no-build
+fi
 ln -sfn "$release" "$root/current"
 echo "Restored $release. Shared .env and host configuration were preserved."

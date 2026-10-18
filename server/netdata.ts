@@ -1,3 +1,8 @@
+import { lookup } from 'node:dns/promises';
+import { isIP } from 'node:net';
+import { TargetPolicy } from './targets.js';
+import { CheckSchema } from './check-config.js';
+import { request as pinnedRequest } from './probe.js';
 import { DIAGNOSTICS, sensorGroup, metricName, activeAlert, resolvedAlert } from './investigation.js';
 import type { Metric, Diagnostic, AlertHistory, MetricHistory, Window } from '../src/investigation-types.js';
 import type { HostConfig } from './config.js';
@@ -158,15 +163,24 @@ export class Agent {
     this.detailsPending.set(key, pending);
     return pending;
   }
+  private agentPolicy?: Promise<TargetPolicy>;
   private async request(path: string, params: Record<string, string> = {}) {
     const url = new URL(path, this.config.url);
     Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
     const token = this.config.tokenEnv ? process.env[this.config.tokenEnv] : undefined;
-    const response = await fetch(url, {
-      signal: AbortSignal.timeout(6000),
-      redirect: 'error',
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
+    const target = CheckSchema.parse({id: this.config.id, name: this.config.name, hostId: this.config.id, type: 'http', url: this.config.url});
+    if (!this.agentPolicy) {
+      const host = url.hostname.replace(/^\[|\]$/g, '');
+      this.agentPolicy = (async () => {
+        const addresses = this.config.addresses ?? (isIP(host) ? [host] : (await Promise.race([
+          lookup(host, {all: true, verbatim: true}),
+          new Promise<never>((_, reject) => { const timer = setTimeout(() => reject(Error('Agent DNS timed out')), 3000); timer.unref(); }),
+        ])).map(a => a.address));
+        return new TargetPolicy([{host, port: Number(url.port || (url.protocol === 'https:' ? 443 : 80)), addresses}]);
+      })().catch(error => { this.agentPolicy = undefined; throw error; });
+    }
+    const address = await (await this.agentPolicy).address(target);
+    const response = await pinnedRequest(url, token ? {Authorization: `Bearer ${token}`} : {}, AbortSignal.timeout(6000), address, 16 * 1024 * 1024);
     if (!response.ok) throw new Error(`Agent returned HTTP ${response.status}`);
     return response.json();
   }

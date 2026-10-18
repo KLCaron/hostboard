@@ -10,12 +10,18 @@ RUN npm run build
 
 FROM node:24-alpine AS runtime
 LABEL org.opencontainers.image.licenses="AGPL-3.0-only"
+ARG VERSION=0.5.0
+ARG REVISION=unknown
+LABEL org.opencontainers.image.source="https://github.com/KLCaron/hostboard" \
+      org.opencontainers.image.version=$VERSION \
+      org.opencontainers.image.revision=$REVISION
 ENV NODE_ENV=production PORT=8088
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /app/dist ./dist
 COPY LICENSE ./LICENSE
+RUN mkdir -p /app/data /app/private /app/config && chown node:node /app/data /app/private /app/config
 USER node
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 CMD node -e "fetch('http://'+process.env.HOSTBOARD_BIND+':'+process.env.PORT+'/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 CMD node -e "fetch('http://127.0.0.1:'+process.env.PORT+'/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
 CMD ["node", "dist/server/server/index.js"]

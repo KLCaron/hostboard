@@ -1,0 +1,66 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import express from 'express';
+import { hash } from 'argon2';
+import { randomBytes } from 'node:crypto';
+import { LocalSchema, authorization } from '../server/admin.js';
+import { localAuthentication } from '../server/local-auth.js';
+async function fixture(t:test.TestContext, https=false, trusted=true) {
+  const app=express();
+  const server=app.listen(0,'127.0.0.1');
+  await new Promise<void>(r=>server.once('listening',r));
+  const url=`http://127.0.0.1:${(server.address() as {port:number}).port}`;
+  t.after(()=>{server.closeAllConnections();server.close();});
+  const config=LocalSchema.parse({mode:'local',origin:https?'https://dashboard.example.com':url,username:'operator',passwordHash:await hash('a secure test password',{memoryCost:65536,timeCost:3,parallelism:1}),sessionSecret:randomBytes(32).toString('hex'),targets:[],trustedProxies:trusted?['127.0.0.1']:[]});
+  const stop=localAuthentication(app,config);
+  app.get('/api/private',(_req,res)=>res.json({ok:true}));
+  app.use('/api/admin',authorization(config).guard,express.json());
+  app.post('/api/admin/save',(_req,res)=>res.json({saved:true}));
+  app.post('/api/expire',(req,res)=>{req.session.expiresAt=1;res.end();});
+  t.after(()=>{stop();server.closeAllConnections();server.close();});
+  const get=async (route:string,cookie?:string,headers:Record<string,string>={})=>fetch(url+route,{redirect:'manual',headers:{...(cookie?{Cookie:cookie}:{}),...headers}});
+  const loginPage=await get('/auth/login',undefined,https?{'X-Forwarded-Proto':'https'}:{});
+  const csrf=(await loginPage.text()).match(/name="csrf" value="([a-f0-9]+)"/)![1];
+  const initialCookie=loginPage.headers.get('set-cookie')?.split(';')[0] ?? '';
+  const login=(patch:Record<string,string>={},cookie=initialCookie,origin=config.origin)=>fetch(url+'/auth/login',{method:'POST',redirect:'manual',headers:{Origin:origin,Cookie:cookie,'Content-Type':'application/x-www-form-urlencoded',...(https?{'X-Forwarded-Proto':'https'}:{})},body:new URLSearchParams({username:'operator',password:'a secure test password',csrf,...patch})});
+  return {url,get,login,initialCookie,csrf,origin:config.origin};
+}
+test('local authentication protects reads/writes, rejects forged identities and CSRF, rotates sessions and logs out',async t=>{
+  const f=await fixture(t);
+  assert.equal((await f.get('/')).status,303);
+  assert.equal((await f.get('/api/private',undefined,{'Cf-Access-Jwt-Assertion':'forged','Cf-Access-Authenticated-User-Email':'operator'})).status,401);
+  assert.equal((await f.login({},f.initialCookie,'https://evil.example')).status,403);
+  assert.equal((await f.login({csrf:'bad'})).status,403);
+  assert.equal((await f.login({password:'wrong'})).status,401);
+  assert.equal((await f.login({username:'unknown'})).status,401);
+  const response=await f.login();assert.equal(response.status,303);
+  const setCookie=response.headers.get('set-cookie')!;
+  assert.match(setCookie,/HttpOnly/);assert.match(setCookie,/SameSite=Strict/);
+  const cookie=setCookie.split(';')[0];assert.notEqual(cookie,f.initialCookie);
+  assert.equal((await f.get('/api/private',f.initialCookie)).status,401);
+  assert.equal((await f.get('/api/private',cookie)).status,200);
+  const save=(headers:Record<string,string>)=>fetch(f.url+'/api/admin/save',{method:'POST',headers:{Cookie:cookie,'Content-Type':'application/json',...headers},body:'{}'});
+  assert.equal((await save({Origin:f.origin})).status,403);
+  assert.equal((await save({Origin:'https://evil.example','X-Hostboard-Request':'1'})).status,403);
+  assert.equal((await save({Origin:f.origin,'X-Hostboard-Request':'1'})).status,200);
+  const logoutPage=await f.get('/auth/logout',cookie);
+  const csrf=(await logoutPage.text()).match(/name="csrf" value="([a-f0-9]+)"/)![1];
+  assert.equal((await fetch(f.url+'/auth/logout',{method:'POST',headers:{Cookie:cookie,Origin:f.origin,'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({csrf}),redirect:'manual'})).status,303);
+  assert.equal((await f.get('/api/private',cookie)).status,401);
+});
+test('sessions expire absolutely and repeated login attempts are throttled',async t=>{
+  const f=await fixture(t);
+  const response=await f.login(),cookie=response.headers.get('set-cookie')!.split(';')[0];
+  await fetch(f.url+'/api/expire',{method:'POST',headers:{Cookie:cookie}});
+  assert.equal((await f.get('/api/private',cookie)).status,401);
+  for(let n=0;n<9;n++) assert.equal((await f.login({csrf:'invalid'})).status,403);
+  assert.equal((await f.login()).status,429);
+});
+test('HTTPS sessions require an explicitly trusted proxy and use Secure host-only cookies',async t=>{
+  const f=await fixture(t,true),response=await f.login();
+  assert.equal(response.status,303);
+  assert.match(response.headers.get('set-cookie')!,/^__Host-hostboard=.*; Path=\/;.*HttpOnly; Secure; SameSite=Strict/);
+  const untrusted=await fixture(t,true,false);
+  assert.equal(untrusted.initialCookie,'');
+  assert.equal((await untrusted.login()).status,403);
+});

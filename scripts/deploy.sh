@@ -12,6 +12,7 @@ actual=$(ssh "${ssh_args[@]}" "$target" hostname)
 [[ -f config/checks.json ]] || printf '{"checks":[]}\n' > config/checks.json
 npm test
 npm run build
+npm run test:browser
 release="$(date -u +%Y%m%dT%H%M%SZ)-$(git rev-parse --short HEAD)"
 root=/srv/stacks/hostboard
 ssh "${ssh_args[@]}" "$target" "set -eu; if [ ! -d '$root' ]; then sudo -n install -d -o \"\$(id -un)\" -g \"\$(id -gn)\" '$root'; fi; mkdir -p '$root/releases/$release' '$root/config'; if [ -f '$root/.env' ]; then cp '$root/.env' '$root/.env.before-$release'; fi; if [ -f '$root/config/hosts.json' ]; then cp '$root/config/hosts.json' '$root/config/hosts.json.before-$release'; fi"
@@ -45,8 +46,8 @@ ln -s "$root/config/hosts.json" "$root/releases/$release/config/hosts.json"
 if [ -L "$root/current" ]; then readlink "$root/current" > "$root/previous-release"; fi
 cd "$root/releases/$release"
 export HOSTBOARD_TAG="$release"
-docker compose --env-file "$root/.env" build
-docker compose --env-file "$root/.env" up -d --no-build
+docker compose -f deploy/compose.host.yaml --project-directory . --env-file "$root/.env" build
+docker compose -f deploy/compose.host.yaml --project-directory . --env-file "$root/.env" up -d --no-build
 # Verify the actual HTTP listener before advancing current.
 set -a
 source "$root/.env"
@@ -63,7 +64,11 @@ if [ -f "$root/previous-release" ]; then
   previous=$(cat "$root/previous-release")
   if [ -d "$previous" ]; then
     cd "$previous"
-    HOSTBOARD_TAG=$(basename "$previous") docker compose --env-file "$root/.env" up -d --no-build
+    if [ -f deploy/compose.host.yaml ]; then
+      HOSTBOARD_TAG=$(basename "$previous") docker compose -f deploy/compose.host.yaml --project-directory . --env-file "$root/.env" up -d --no-build
+    else
+      HOSTBOARD_TAG=$(basename "$previous") docker compose --env-file "$root/.env" up -d --no-build
+    fi
   fi
 fi
 echo 'Deployment health check failed; previous image was restored when available.' >&2

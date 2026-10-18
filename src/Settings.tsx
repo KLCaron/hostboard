@@ -155,7 +155,7 @@ export function Settings({
     [personal, setPersonal] = useState(display),
     [scope, setScope] = useState("personal");
   const [tab, setTab] = useState<(typeof tabs)[number]>("General"),
-    [session, setSession] = useState<{ admin: boolean; configured: boolean }>(),
+    [session, setSession] = useState<{ admin: boolean; configured: boolean; mode?: string }>(),
     [config, setConfig] = useState<Config>(),
     [draft, setDraft] = useState<Values>(),
     [service, setService] = useState<Service | null>(),
@@ -355,11 +355,12 @@ export function Settings({
       <p className="detail-description">
         Personalize this browser or manage application configuration.
       </p>
+      {session?.mode === "local" && <p><a href="/auth/logout">Sign out</a></p>}
       {!session?.admin && (
         <p className="notice">
           {session?.configured
             ? "Read-only application configuration. Sign in through Cloudflare Access with an authorized administrator identity to make global changes."
-            : "Application administration is locked. Configure a signed Cloudflare Access identity and explicit administrator allowlist on the server."}{" "}
+            : "Application administration is locked. Run the setup CLI on the server to configure administrator authentication."}{" "}
           Personal preferences remain available.
         </p>
       )}

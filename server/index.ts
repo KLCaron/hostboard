@@ -12,7 +12,12 @@ import { smtpDelivery } from "./notifications.js";
 import { bootstrapTargets } from "./targets.js";
 import { Configuration } from "./settings.js";
 import { loadAdmin } from "./admin.js";
+import { rateLimit } from "express-rate-limit";
+import { localAuthentication } from "./local-auth.js";
 import { configAPI, synchronize } from "./config-api.js";
+process.umask(0o077);
+const admin = loadAdmin();
+if (!admin) throw Error("Administrator configuration is missing. Run scripts/setup.sh before starting Hostboard.");
 const agents = loadConfig().hosts.map((host) => new Agent(host));
 const seed = loadChecks(agents.map((a) => a.config.id));
 const configuration = new Configuration(
@@ -25,7 +30,6 @@ const monitor = new Monitor(
   smtpDelivery(() => configuration.settings().notifications),
 );
 synchronize(configuration, monitor);
-const admin = loadAdmin();
 const app = express();
 app.disable("x-powered-by");
 app.use((_req, res, next) => {
@@ -39,6 +43,13 @@ app.use((_req, res, next) => {
   next();
 });
 app.get("/api/health", (_req, res) => res.json({ status: "ok" }));
+app.get("/api/monitor-health", (_req, res) =>
+  res
+    .status(monitor.healthy() ? 200 : 503)
+    .json({ status: monitor.healthy() ? "ok" : "unavailable" }),
+);
+const stopSessions = admin.mode === "local" ? localAuthentication(app, admin) : () => {};
+app.use("/api", rateLimit({ windowMs: 60000, limit: 600, standardHeaders: "draft-8", legacyHeaders: false }));
 app.use("/api", (_req, res, next) => {
   res.set("Cache-Control", "no-store");
   next();
@@ -87,11 +98,7 @@ app.get("/api/system", async (_req, res) => {
     sampleDays: view.retentionDays,
   });
 });
-app.get("/api/monitor-health", (_req, res) =>
-  res
-    .status(monitor.healthy() ? 200 : 503)
-    .json({ status: monitor.healthy() ? "ok" : "unavailable" }),
-);
+
 app.get("/api/monitor", (req, res) => {
   const before = req.query.before;
   if (
@@ -207,6 +214,10 @@ for (const endpoint of [
 app.use("/api", (_req, res) =>
   res.status(404).json({ error: "Unknown endpoint" }),
 );
+app.use(((error, _req, res, _next) => {
+  console.error("Request failed:", error instanceof Error ? error.name : "Unknown error");
+  res.status(500).json({error: "Request failed. Check the server logs."});
+}) as express.ErrorRequestHandler);
 const client = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "../../client",
@@ -230,7 +241,7 @@ app.get(
 );
 const bind = process.env.HOSTBOARD_BIND || "127.0.0.1",
   port = Number(process.env.PORT || 3001);
-if (!privateBind(bind))
+if (!privateBind(bind) && !(bind === "0.0.0.0" && process.env.HOSTBOARD_CONTAINER === "1"))
   throw new Error(
     "HOSTBOARD_BIND must be loopback, a private LAN address, or a VPN address",
   );
@@ -252,6 +263,7 @@ const servers = addresses.map((address) =>
 );
 process.on("SIGTERM", () => {
   monitor.stop();
+  stopSessions();
   let remaining = servers.length;
   for (const server of servers) {
     server.close(() => {

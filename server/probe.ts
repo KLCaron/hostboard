@@ -237,11 +237,12 @@ export async function probe(
 }
 
 // Native request lookup pins the checked DNS answer while retaining Host and TLS SNI.
-async function request(
+export async function request(
   url: URL,
   headers: Record<string, string>,
   signal: AbortSignal,
   address?: { address: string; family: number },
+  maxBody = MAX_BODY,
 ): Promise<Response> {
   return new Promise((resolve, reject) => {
     const req = (url.protocol === "https:" ? https : http).request(
@@ -263,7 +264,7 @@ async function request(
         let length = 0;
         res.on("data", (chunk: Buffer) => {
           length += chunk.length;
-          if (length > MAX_BODY) {
+          if (length > maxBody) {
             req.destroy();
             reject(Error("Response too large"));
           } else chunks.push(chunk);

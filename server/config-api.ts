@@ -71,7 +71,7 @@ export function configAPI(
     res.json({ general: store.settings().general }),
   );
   router.get("/session", async (req, res) =>
-    res.json({ admin: !!(await auth.identity(req)), configured: !!admin }),
+    res.json({ admin: !!(await auth.identity(req)), configured: !!admin, mode: admin?.mode ?? "cloudflare" }),
   );
   router.use("/admin", auth.guard, express.json({ limit: "24kb" }));
   router.get("/admin/config", (_req, res) =>

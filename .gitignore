@@ -38,3 +38,5 @@ GEMINI.md
 
 __pycache__/
 *.pyc
+
+backups/

@@ -1,0 +1,27 @@
+import { fixtureAgent } from './fixture-agent.js';
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { spawn } from 'node:child_process';
+import { Configuration } from '../server/settings.js';
+import { Monitor } from '../server/monitor.js';
+import { ChecksSchema } from '../server/check-config.js';
+const dir=mkdtempSync(path.join(tmpdir(),'hostboard-browser-'));
+mkdirSync('.ai-local',{recursive:true,mode:0o700});
+const agent=fixtureAgent().listen(0,'127.0.0.1');
+await new Promise<void>(r=>agent.once('listening',r));
+const port=(agent.address() as {port:number}).port;
+const write=(name:string,value:unknown)=>{const file=path.join(dir,name);writeFileSync(file,JSON.stringify(value));return file;};
+const hosts=write('hosts.json',{hosts:[{id:'server-a',name:'Example server',url:`http://127.0.0.1:${port}`,node:'fixture-server'}]});
+const checks=ChecksSchema.parse({checks:[{id:'infrastructure',name:'Agent availability',hostId:'server-a',group:'Infrastructure',type:'http',url:`http://127.0.0.1:${port}/health`,notify:false},{id:'application',name:'Example web',hostId:'server-a',group:'Applications',type:'http',url:`http://127.0.0.1:${port}/health`,notify:false}]});
+const checkFile=write('checks.json',checks);
+const admin=write('admin.json',{issuer:'https://fixture.cloudflareaccess.com',audience:'fixture',emails:['admin@example.com'],origin:'https://hostboard.example.com',targets:[{host:'127.0.0.1',port,addresses:['127.0.0.1']}]});
+const db=path.join(dir,'monitor.sqlite'), store=new Configuration(db,checks), monitor=new Monitor(store.runtime(),store.db,null);
+const now=Date.now()/1000;
+for(const check of checks.checks) for(let n=20;n>=1;n--) monitor.record(check,{ok:true,responseMs:20+n,reason:'Fixture HTTP 200'},now-n*60);
+monitor.stop();store.db.close();
+const child=spawn(process.execPath,['dist/server/server/index.js'],{stdio:'inherit',env:{...process.env,HOSTBOARD_CONFIG:hosts,HOSTBOARD_CHECKS:checkFile,HOSTBOARD_ADMIN_CONFIG:admin,HOSTBOARD_DB:db,HOSTBOARD_SMTP_CONFIG:path.join(dir,'absent.json'),HOSTBOARD_BIND:'127.0.0.1',PORT:'3001'}});
+let closing=false;
+function close(){if(closing)return;closing=true;child.kill('SIGTERM');agent.close();}
+process.on('SIGTERM',close);process.on('SIGINT',close);
+child.on('exit',code=>{agent.close();rmSync(dir,{recursive:true,force:true});process.exitCode=code??0;});

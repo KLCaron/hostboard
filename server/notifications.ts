@@ -2,10 +2,10 @@ import { readFileSync, existsSync } from "node:fs";
 import nodemailer from "nodemailer";
 import { z } from "zod";
 
-const SmtpSchema = z.object({
-  host: z.string().min(1),
+export const SmtpSchema = z.object({
+  host: z.string().min(1).max(253),
   port: z.union([z.literal(465), z.literal(587)]).default(587),
-  username: z.email(),
+  username: z.string().min(1).max(320),
   password: z.string().min(1),
   from: z.email(),
   to: z.array(z.email()).min(1),
