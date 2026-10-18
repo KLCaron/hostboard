@@ -156,7 +156,8 @@ class WatchdogTests(unittest.TestCase):
                 def __enter__(self): return self
                 def __exit__(self,*args): pass
                 def ehlo(self): pass
-                def starttls(self,**kwargs): pass
+                def starttls(self,**kwargs):
+                    if self._host != 'fixture': raise AssertionError('TLS hostname missing on deferred connect')
                 def login(self,*args): pass
                 def send_message(self,*args):
                     if not closed.wait(2): raise AssertionError('Deadline did not interrupt transport')

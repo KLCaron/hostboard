@@ -89,6 +89,9 @@ class Queue:
         if port not in (465, 587):
             raise ValueError('TLS SMTP port required')
         client = smtplib.SMTP_SSL(timeout=12, context=context, local_hostname=socket.gethostname()) if port == 465 else smtplib.SMTP(timeout=12, local_hostname=socket.gethostname())
+        # Older Python releases do not set the TLS hostname in connect().
+        # Set it before deferred connection so STARTTLS/SMTPS verify the actual host.
+        client._host = config['host']
         expired = threading.Event()
         def cancel():
             expired.set()
