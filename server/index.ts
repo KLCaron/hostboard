@@ -10,7 +10,6 @@ import { Monitor } from './monitor.js';
 import { smtpDelivery } from './notifications.js';
 const agents = loadConfig().hosts.map((host) => new Agent(host));
 const monitor = new Monitor(loadChecks(agents.map(a => a.config.id)), process.env.HOSTBOARD_DB || 'data/monitor.sqlite', smtpDelivery());
-monitor.start();
 const app = express();
 app.disable('x-powered-by');
 app.use((_req, res, next) => {
@@ -110,10 +109,13 @@ if (!Number.isInteger(port) || port < 1024 || port > 65535)
 // Same-host proxies can use localhost while browsers on the LAN use the
 // configured private address. Never bind all interfaces to enable both.
 const addresses = bind === '127.0.0.1' || bind === '::1' ? [bind] : [bind, '127.0.0.1'];
+let listening = 0;
 const servers = addresses.map((address) =>
-  app.listen(port, address, () =>
-    console.log(`Hostboard listening on ${address}:${port}; ${agents.length} hosts configured`),
-  ),
+  app.listen(port, address, () => {
+    console.log(`Hostboard listening on ${address}:${port}; ${agents.length} hosts configured`);
+    // Self-checks must not race the HTTP listeners during startup.
+    if (++listening === addresses.length) monitor.start();
+  }),
 );
 process.on('SIGTERM', () => {
   monitor.stop();
