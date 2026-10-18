@@ -35,7 +35,7 @@ export function Incident({ incident: i }: { incident: IncidentView }) {
     <div className="incident-detail"><p>{i.reason}</p>{i.source === 'watchdog' && <p className="muted">Detected and notified independently by the watchdog.</p>}<dl><dt>Confirmed</dt><dd>{date(i.detectedAt)}</dd><dt>Ended</dt><dd>{date(i.endedAt)}</dd><dt>Latest observation</dt><dd>{i.lastReason}{i.responseMs !== null ? ` · ${Math.round(i.responseMs)} ms` : ''}</dd><dt>Severity</dt><dd>{i.severity}</dd></dl>
       {i.monitoringGap && <p className="notice">Monitoring was interrupted during this incident. Elapsed duration includes an unobserved interval.</p>}
       <LogSection context={{hostId:i.hostId,incidentId:i.id}} initialWindow={incidentLogWindow(i.startedAt,i.endedAt)}/><div className="delivery-list"><b>Notifications</b>{i.notifications.map(n => <p key={n.id}>{n.event}: <strong>{n.state}</strong> · {n.attempts} attempts{n.deliveredAt ? ` · SMTP accepted ${date(n.deliveredAt)}` : ''}{n.error ? ` · ${n.error}` : ''}</p>)}{!i.notifications.length && <p>No notifications recorded.</p>}</div>
-      <a className="text-link" href={`#host=${i.hostId}`}>Host metrics and diagnostics →</a> · <a className="text-link" href={`#service=${i.checkId}`}>Service checks →</a> · <a className="text-link" href={`#incident=${i.id}`}>Direct incident link ↗</a>
+      <div className="context-actions"><a className="text-link" href={`#host=${i.hostId}`}>Host metrics and diagnostics →</a><a className="text-link" href={`#service=${i.checkId}`}>Service checks →</a><a className="text-link" href={`#incident=${i.id}`}>Direct incident link ↗</a></div>
     </div>
   </details>;
 }
@@ -54,7 +54,7 @@ function CheckCard({ c }: { c: CheckView }) {
       <LogSection context={{hostId:c.hostId,serviceId:c.id,generation:c.generation}}/><h4>Last 24 hours</h4><p>{c.summary.availability === null ? 'Insufficient coverage for an availability percentage.' : `${c.summary.availability.toFixed(2)}% of observed time reachable.`} Observed {elapsed(c.summary.observedSeconds)} · unknown {elapsed(c.summary.unknownSeconds)}.</p>
       {open && <div className="response-chart" aria-label={`${c.name} response time history`}><ResponsiveContainer width="100%" height="100%"><LineChart data={c.trend}><XAxis dataKey="time" tickFormatter={t => new Date(t * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} minTickGap={40} stroke="#88968e" fontSize={11}/><YAxis width={45} stroke="#88968e" fontSize={11} unit="ms"/><Tooltip {...chartTooltipTheme} labelFormatter={v => date(Number(v))} formatter={v => [`${Math.round(Number(v))} ms`, 'Response time']}/><Line dataKey="responseMs" stroke="#bbdf93" dot={{ r: 2 }} connectNulls={false} isAnimationActive={false}/></LineChart></ResponsiveContainer></div>}
       <p className="small muted">10 minute averages of successful and failed request durations. Blank intervals have no observations. Raw sample retention is configured in Settings.</p>
-      <a className="text-link" href={`#host=${c.hostId}`}>Open host →</a>{c.activeIncident && <a className="text-link" href={`#incident=${c.activeIncident}`}> · Open incident →</a>} · <a className="text-link" href={`#issues?tab=history&type=availability&service=${c.id}`}>Incident history →</a>
+      <div className="context-actions"><a className="text-link" href={`#host=${c.hostId}`}>Open host →</a>{c.activeIncident && <a className="text-link" href={`#incident=${c.activeIncident}`}>Open incident →</a>}<a className="text-link" href={`#issues?tab=history&type=availability&service=${c.id}`}>Incident history →</a></div>
     </div></details>;
 }
 export function MonitorNotice({ data, error }: { data?: MonitorView; error: boolean }) {
@@ -77,11 +77,11 @@ export function HealthSummary({ hosts, data, error }: { hosts: Host[]; data?: Mo
   const complete = !!hosts.length && hosts.every(h=>h.status==='online'&&h.alerts!==null) && !!data?.healthy && !error;
   return <section className="monitor-panel health-summary" aria-label="Monitoring health summary">
     <div><h2>{complete && !unhealthy.length && !count ? 'Everything is healthy' : !complete ? 'Health coverage needs attention' : 'Issues need attention'}</h2>
-    <p>{data ? `${data.checks.filter(c=>c.state==='up').length}/${data.checks.filter(c=>c.state!=='disabled').length} services healthy` : 'Service health loading…'} · <a className="text-link" href="#issues">{count} active issue{count===1?'':'s'}</a>{!complete && ' · coverage incomplete'}</p></div>
-    <a className="text-link" href="#services">View services →</a>
-    {!!unhealthy.length&&<div className="health-attention">{unhealthy.map(c=><a key={c.id} className={`check-state ${c.state}`} href={`#service=${c.id}`}>{c.name}: {checkLabel(c)}</a>)}</div>}
-    {hosts.filter(h=>h.status!=='online').map(h=><a key={h.id} className="warning-text" href={`#host=${h.id}`}>{h.name}: {h.status}</a>)}
-    {(data?.activeIncidents??data?.incidents??[]).filter(i=>i.endedAt===null).slice(0,3).map(i=><a className="warning-text" key={i.id} href={`#incident=${i.id}`}>{i.name}: confirmed availability failure</a>)}
+    <p>{data ? `${data.checks.filter(c=>c.state==='up').length}/${data.checks.filter(c=>c.state!=='disabled').length} services healthy` : 'Service health loading…'} · <a className="action-link issue-summary-link" href="#issues">{count} active issue{count===1?'':'s'}</a>{!complete && ' · coverage incomplete'}</p></div>
+    <a className="action-link" href="#services">View services →</a>
+    {!!unhealthy.length&&<div className="health-attention">{unhealthy.map(c=><a key={c.id} className={`text-link check-state ${c.state}`} href={`#service=${c.id}`}>{c.name}: {checkLabel(c)}</a>)}</div>}
+    {hosts.filter(h=>h.status!=='online').map(h=><a key={h.id} className="text-link warning-text" href={`#host=${h.id}`}>{h.name}: {h.status}</a>)}
+    {(data?.activeIncidents??data?.incidents??[]).filter(i=>i.endedAt===null).slice(0,3).map(i=><a className="text-link warning-text" key={i.id} href={`#incident=${i.id}`}>{i.name}: confirmed availability failure</a>)}
     {count>0&&<p className="warning-text">{hosts.flatMap(h=>(h.alerts??[]).map(a=>`${h.name}: ${a.summary}`)).slice(0,3).join(' · ')}{data?.notifications.failed ? ' · SMTP delivery needs attention' : ''}</p>}
   </section>;
 }

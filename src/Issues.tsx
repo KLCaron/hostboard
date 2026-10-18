@@ -1,3 +1,4 @@
+import { TabList } from "./TabList";
 import { useEffect, useRef, useState } from 'react';
 import type { Host } from './types';
 import type { MonitorView, IncidentView } from './monitor-types';
@@ -75,7 +76,7 @@ export function Issues({ hosts, data, error, onInvestigate }: { hosts: Host[]; d
   const cursor=[...(data?.incidents??[]),...older].at(-1)?.id;
   return <div className="issues-view"><MonitorNotice data={data} error={error}/>
     <p className="detail-description">Metric alerts are Netdata warnings or critical thresholds. Availability incidents confirm failed service checks. Sources evaluate independently; records without a verified relationship remain separate.</p>
-    <div className="detail-tabs issue-tabs" role="tablist" aria-label="Issue period">{['active','history'].map(tab=><button key={tab} role="tab" aria-selected={filters.tab===tab} className={filters.tab===tab?'active':''} onClick={()=>change({tab,status:'all'})}>{tab==='active'?'Active':'History'}</button>)}</div>
+    <TabList className="detail-tabs issue-tabs" aria-label="Issue period">{['active','history'].map(tab=><button key={tab} role="tab" aria-selected={filters.tab===tab} className={filters.tab===tab?'active':''} tabIndex={filters.tab===tab?0:-1} onClick={()=>change({tab,status:'all'})}>{tab==='active'?'Active':'History'}</button>)}</TabList>
     <div className="issue-filters">
       <label>Issue type<select aria-label="Issue type" value={filters.type} onChange={e=>change({type:e.target.value})}><option value="all">All types</option><option value="metric">Metric alerts</option><option value="availability">Availability incidents</option><option value="notification">Notification delivery</option></select></label>
       <label>Severity<select aria-label="Severity" value={filters.severity} onChange={e=>change({severity:e.target.value})}><option value="all">All severities</option><option value="critical">Critical</option><option value="warning">Warning</option></select></label>

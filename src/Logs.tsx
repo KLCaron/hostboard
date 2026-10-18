@@ -961,19 +961,21 @@ export function LogExplorer({
             className={`log-entry ${level(entry.text)} ${selected.has(i) ? "selected" : ""}`}
             key={`${i}:${entry.time}`}
           >
-            <input
-              type="checkbox"
-              aria-label={`Select log entry ${i + 1}`}
-              disabled={live}
-              checked={selected.has(i)}
-              onChange={(e) =>
-                setSelected((v) => {
-                  const n = new Set(v);
-                  e.target.checked ? n.add(i) : n.delete(i);
-                  return n;
-                })
-              }
-            />
+            <label className="log-entry-select">
+              <input
+                type="checkbox"
+                aria-label={`Select log entry ${i + 1}`}
+                disabled={live}
+                checked={selected.has(i)}
+                onChange={(e) =>
+                  setSelected((v) => {
+                    const n = new Set(v);
+                    e.target.checked ? n.add(i) : n.delete(i);
+                    return n;
+                  })
+                }
+              />
+            </label>
             <time dateTime={entry.time} title={entry.time}>
               {zone === "utc"
                 ? entry.time.replace("T", " ").replace("Z", " UTC")

@@ -36,7 +36,7 @@ try {
   await expect(page.getByRole('heading',{name:'Fleet overview'})).toBeVisible();
   await expect(page.locator('.host-card').first().getByText('Online',{exact:true})).toBeVisible({timeout:15000});
   await page.screenshot({path:`${output}/${name}.png`,fullPage:true});
-  await page.getByRole('button',{name:'Settings',exact:true}).click();
+  await page.getByRole('link',{name:'Settings',exact:true}).click();
   await expect(page.getByRole('link',{name:'Sign out',exact:true})).toBeVisible();
   expect((await page.request.get(origin+'/api/admin/config')).status()).toBe(200);
   expect(await page.evaluate(async()=>{

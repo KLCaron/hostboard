@@ -64,7 +64,7 @@ test('real metric issues retain thresholds, recovery history and container inves
   const fleet=await (await request.get('/api/fleet')).json();
   const current=await (await request.get(`/api/hosts/${fleet.hosts[0].id}/alerts`)).json();
   await page.goto('/');
-  await page.getByRole('button',{name:'Issues',exact:true}).click();
+  await page.getByRole('link',{name:'Issues',exact:true}).click();
   await expect(page.getByRole('heading',{name:'Active issues',exact:true})).toBeVisible();
   await page.getByLabel('Issue type',{exact:true}).selectOption('metric');
   await page.getByLabel('Host',{exact:true}).selectOption(fleet.hosts[0].id);
@@ -93,7 +93,7 @@ test('real metric issues retain thresholds, recovery history and container inves
     await expect(dialog).toBeVisible();
     await page.getByRole('button',{name:'Close investigation'}).click();
   }
-  await page.getByRole('button',{name:'Services',exact:true}).click();
+  await page.getByRole('link',{name:'Services',exact:true}).click();
   await page.locator('.services-panel>summary').click();
   await page.locator('.service-list>details>summary').first().click();
   await expect(page.locator('.service-list').getByText(/Application availability: not independently checked/).first()).toBeVisible();
@@ -181,7 +181,7 @@ test('dragging the plot and timeline selects a real range and zoom queries that 
   await page.mouse.move(b.x+b.width*.8,b.y+b.height/2);await page.mouse.down();
   await page.mouse.move(b.x+b.width*.3,b.y+b.height/2,{steps:10});await page.mouse.up();
   await expect(zoom).toBeEnabled();
-  await end.evaluate(el=>el.scrollIntoView({block:'center'}));
+  await end.scrollIntoViewIfNeeded();
   const handle=(await end.boundingBox())!;const previousEnd=Number(await end.getAttribute('aria-valuenow'));
   await page.mouse.move(handle.x+handle.width/2,handle.y+handle.height/2);await page.mouse.down();
   await page.mouse.move(handle.x+handle.width/2-b.width*.1,handle.y+handle.height/2,{steps:8});await page.mouse.up();

@@ -317,11 +317,11 @@ test("source and exact range bookmarks restore, presets change data and appearan
   expect(s.queries.at(-1).before).toBe(before);
   await page
     .getByRole("navigation", { name: "Main navigation" })
-    .getByRole("button", { name: "Services", exact: true })
+    .getByRole("link", { name: "Services", exact: true })
     .click();
   await page
     .getByRole("navigation", { name: "Main navigation" })
-    .getByRole("button", { name: "Logs", exact: true })
+    .getByRole("link", { name: "Logs", exact: true })
     .click();
   await expect(page.getByLabel("Log source", { exact: true })).toHaveValue(
     "web",
@@ -575,4 +575,30 @@ test("incremental loading and source changes preserve the investigation window; 
   await expect.poll(() => s.queries.at(-1).source).toBe("worker");
   expect(s.queries.at(-1).after).toBe(start);
   expect(s.queries.at(-1).before).toBe(end);
+});
+
+test('log selection survives hover, checkbox label is touchable and nested JSON disclosure is independent', async ({page}, info) => {
+  await fixture(page);
+  await page.goto('/#logs?host=server-a&source=web');
+  const entry = page.locator('.log-entry').nth(2);
+  const checkbox = entry.getByRole('checkbox');
+  await expect(checkbox).toBeVisible();
+  await entry.locator('.log-entry-select').click();
+  await expect(checkbox).toBeChecked();
+  await expect(entry).toHaveCSS('background-color','rgb(45, 57, 42)');
+  if (!info.project.name.includes('mobile')) {
+    await entry.hover();
+    await expect(entry).toHaveCSS('background-color','rgb(45, 57, 42)');
+  }
+  await entry.locator('summary').click();
+  await expect(entry.locator('details')).toHaveJSProperty('open',true);
+  await expect(checkbox).toBeChecked();
+  await checkbox.focus();
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('Shift+Tab');
+  await expect(checkbox).toHaveCSS('outline-style','solid');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({animations:"disabled",path:`.ai-local/v062/${info.project.name}-logs-selection-focus.png`,fullPage:true});
+  await page.getByRole('button',{name:'Resume live tail',exact:true}).click();
+  await expect(checkbox).toBeDisabled();
 });

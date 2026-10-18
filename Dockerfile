@@ -10,7 +10,7 @@ RUN npm run build
 
 FROM node:24-alpine@sha256:44fce696f38ba8c987c4db89954051000bbd05ffd8d8659ba15ed4a8602e937f AS runtime
 LABEL org.opencontainers.image.licenses="AGPL-3.0-only"
-ARG VERSION=0.6.1
+ARG VERSION=0.6.2
 ARG REVISION=unknown
 LABEL org.opencontainers.image.source="https://github.com/KLCaron/hostboard" \
       org.opencontainers.image.version=$VERSION \

@@ -7,7 +7,7 @@ import { probe } from '../../server/probe';
 
 // Isolated HTTP outage/recovery fixture. Real production metric APIs remain untouched.
 // Its notification provider deliberately fails; it never connects to Gmail or sends mail.
-test('observed availability failure, failed delivery, recovery and bookmarked incident details',async({page,request})=>{
+test('observed availability failure, failed delivery, recovery and bookmarked incident details',async({page,request},info)=>{
   let healthy=false;
   const server=http.createServer((_req,res)=>{res.statusCode=healthy?200:503;res.end(healthy?'Healthy':'Unavailable');});
   await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));
@@ -22,12 +22,13 @@ test('observed availability failure, failed delivery, recovery and bookmarked in
     await page.goto('/#services');
     await page.locator('.check-card>summary').click();
     await expect(page.getByText('Unreachable',{exact:true})).toBeVisible();
-    await page.getByRole('link',{name:' · Open incident →',exact:true}).click();
+    await page.getByRole('link',{name:'Open incident →',exact:true}).click();
     await expect(page.getByRole('tab',{name:'Active',exact:true})).toHaveAttribute('aria-selected','true');
     await expect(page.locator(`#incident-${incident.id}`)).toHaveJSProperty('open',true);
     await expect(page.locator('.issue-record[data-issue-type=availability]')).toHaveCount(1);
     await expect(page.locator('.issue-record[data-issue-type=notification]')).toHaveCount(0); // Direct link selects availability.
     await expect(page.locator('.incident-detail')).toContainText('SMTP delivery failed; retry scheduled');
+    await page.screenshot({path:`.ai-local/v062/${info.project.name}-issue-expanded.png`,fullPage:true,animations:'disabled'});
     await page.getByRole('button',{name:'Reset filters',exact:true}).click();
     await expect(page.locator('.issue-record[data-issue-type=notification]')).toHaveCount(1);
     await page.getByLabel('Issue type',{exact:true}).selectOption('notification');

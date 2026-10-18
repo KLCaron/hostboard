@@ -1,3 +1,4 @@
+import { TabList } from "./TabList";
 import { LogsPage } from './Logs';
 import { RangeSelector } from './RangeSelector';
 import {
@@ -9,7 +10,7 @@ import {
   type InvestigationTarget,
 } from "./Investigation";
 import { readPreference, savePreference } from "./preferences";
-import React, { useEffect, useId, useState } from "react";
+import React, { useEffect, useId, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   ArrowDownLeft,
@@ -245,6 +246,7 @@ function HostCard({
               <i /> {host.os?.split(" (")[0] || host.hostname}
             </span>
           </span>
+          {expanded ? <ChevronDown size={15} aria-hidden="true" /> : <ChevronRight size={15} aria-hidden="true" />}
         </button>
         <span className={`status ${host.status}`}>
           <i />
@@ -401,7 +403,7 @@ function HostCard({
           </span>
         </div>
         <button
-          className="details-button"
+          className="details-button action-link"
           onClick={onExpand}
           aria-expanded={expanded}
         >
@@ -411,9 +413,8 @@ function HostCard({
       </div>
       {expanded && (
         <div className="host-details">
-          <div
+          <TabList
             className="detail-tabs"
-            role="tablist"
             aria-label={`${host.name} details`}
           >
             {(
@@ -422,6 +423,7 @@ function HostCard({
               <button
                 role="tab"
                 aria-selected={tab === t}
+                tabIndex={tab === t ? 0 : -1}
                 className={tab === t ? "active" : ""}
                 onClick={() => setTab(t)}
                 key={t}
@@ -435,7 +437,7 @@ function HostCard({
                       : "Temperatures"}
               </button>
             ))}
-          </div>
+          </TabList>
           {tab === "performance" && (
             <>
               <HostExplorer host={host} range={range} />
@@ -530,6 +532,7 @@ function App() {
     [now, setNow] = useState(Date.now()),
     [help, setHelp] = useState(false),
     [query, setQuery] = useState("");
+  const helpDialog = useRef<HTMLDialogElement>(null);
   const monitoring = useMonitoring(refresh, display.refreshSeconds);
   useEffect(() => {
     setRange(
@@ -647,11 +650,9 @@ function App() {
   }, [ids, range, refresh]);
   useEffect(() => {
     if (!help) return;
-    const close = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setHelp(false);
-    };
-    window.addEventListener("keydown", close);
-    return () => window.removeEventListener("keydown", close);
+    const dialog = helpDialog.current!;
+    dialog.showModal();
+    return () => dialog.close();
   }, [help]);
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
@@ -693,17 +694,13 @@ function App() {
   const age = fleet
     ? Math.max(0, Math.floor((now - Date.parse(fleet.generatedAt)) / 1000))
     : null;
-  const navigate = (value: typeof page) => {
+  const navigate = (event: React.MouseEvent<HTMLAnchorElement>) => {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     if (
       !window.dispatchEvent(
         new Event("hostboard:navigate", { cancelable: true }),
       )
-    )
-      return;
-    location.hash = value;
-    setPage(value);
-    setQuery("");
-    setExpanded(null);
+    ) event.preventDefault();
   };
   const fleetSummary = (
     <section className="fleet-stats" aria-label="Fleet summary">
@@ -840,13 +837,14 @@ function App() {
             }[value];
             const label = value[0].toUpperCase() + value.slice(1);
             return (
-              <button
+              <a
+                href={`#${value}`}
                 key={value}
                 aria-label={label}
                 aria-current={page === value ? "page" : undefined}
                 title={label}
                 className={page === value ? "selected" : ""}
-                onClick={() => navigate(value)}
+                onClick={navigate}
               >
                 <Icon size={18} />
                 <span className="nav-label">{label}</span>
@@ -858,7 +856,7 @@ function App() {
                     {issueCount}
                   </span>
                 )}
-              </button>
+              </a>
             );
           })}
         </nav>
@@ -904,6 +902,7 @@ function App() {
               className="refresh-button"
               onClick={() => setRefresh((v) => v + 1)}
               disabled={fetching}
+              aria-busy={fetching}
               title="Refresh all metrics"
               aria-label="Refresh"
             >
@@ -1045,41 +1044,39 @@ function App() {
         <InvestigationDialog target={target} onClose={() => setTarget(null)} />
       )}
       {help && (
-        <div className="modal-backdrop" onClick={() => setHelp(false)}>
-          <section
-            className="modal"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="about-title"
-            onClick={(e) => e.stopPropagation()}
+        <dialog
+          ref={helpDialog}
+          className="modal about-dialog"
+          onCancel={() => setHelp(false)}
+          aria-labelledby="about-title"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            className="close-modal"
+            onClick={() => setHelp(false)}
+            aria-label="Close dashboard info"
+            autoFocus
           >
-            <button
-              className="close-modal"
-              onClick={() => setHelp(false)}
-              aria-label="Close dashboard info"
-              autoFocus
-            >
-              <X size={20} />
-            </button>
-            <h2 id="about-title">Dashboard info</h2>
-            <p>
-              Live metrics refresh every {display.refreshSeconds} seconds.
-              Historical charts refresh every 30 seconds.
-            </p>
-            <p>
-              Overview sparklines show averages. Open a host or alert to
-              investigate minimum, peak and average values with custom windows,
-              zoom, pan and pause. Gaps indicate missing data.
-            </p>
-            <p>
-              Offline and stale hosts are excluded from fleet totals. Container
-              CPU usage is measured per core: 100% equals one core.
-            </p>
-            <button className="primary-button" onClick={() => setHelp(false)}>
-              Close
-            </button>
-          </section>
-        </div>
+            <X size={20} />
+          </button>
+          <h2 id="about-title">Dashboard info</h2>
+          <p>
+            Live metrics refresh every {display.refreshSeconds} seconds.
+            Historical charts refresh every 30 seconds.
+          </p>
+          <p>
+            Overview sparklines show averages. Open a host or alert to
+            investigate minimum, peak and average values with custom windows,
+            zoom, pan and pause. Gaps indicate missing data.
+          </p>
+          <p>
+            Offline and stale hosts are excluded from fleet totals. Container
+            CPU usage is measured per core: 100% equals one core.
+          </p>
+          <button className="primary-button" onClick={() => setHelp(false)}>
+            Close
+          </button>
+        </dialog>
       )}
     </div>
   );

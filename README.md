@@ -23,7 +23,7 @@ Requires Linux, Git, Docker Engine with Compose v2, and at least one reachable N
 ```sh
 git clone https://github.com/KLCaron/hostboard.git
 cd hostboard
-git checkout v0.6.1
+git checkout v0.6.2
 ./scripts/setup.sh
 ./scripts/setup.sh --check
 docker compose up -d --wait
@@ -78,7 +78,7 @@ Read approved Docker stdout/stderr from container and service details, or open r
 ```sh
 ./scripts/manage.sh backup ./backups/manual
 # After reviewing a newer release, substitute its exact version or digest:
-./scripts/manage.sh upgrade ghcr.io/klcaron/hostboard:0.6.1 ./backups/before-upgrade
+./scripts/manage.sh upgrade ghcr.io/klcaron/hostboard:0.6.2 ./backups/before-upgrade
 # Restore the paired image, configuration, and database if necessary:
 ./scripts/manage.sh rollback ./backups/before-upgrade
 ```

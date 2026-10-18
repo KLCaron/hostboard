@@ -12,15 +12,15 @@ test('six sections, real checks and groupings, expanded trends, settings and com
   expect((await request.get('/api/monitor?before=oops')).status()).toBe(400);
   await page.goto('/');
   const nav=page.getByRole('navigation',{name:'Main navigation'});
-  await expect(nav.getByRole('button')).toHaveCount(6);
-  for(const name of ['Overview','Servers','Services','Logs','Issues','Settings']) await expect(nav.getByRole('button',{name,exact:true})).toBeInViewport();
+  await expect(nav.getByRole('link')).toHaveCount(6);
+  for(const name of ['Overview','Servers','Services','Logs','Issues','Settings']) await expect(nav.getByRole('link',{name,exact:true})).toBeInViewport();
   await expect(page.getByRole('region',{name:'Monitoring health summary'})).toContainText(`${monitor.checks.filter((c:any)=>c.state==='up').length}/${monitor.checks.length} services healthy`);
   await expect(page.getByRole('region',{name:'Monitoring health summary'})).toContainText(`${activeIssueCount(fleet.hosts,monitor)} active issue`);
   await expect(page.locator('.check-card')).toHaveCount(0);
   await page.screenshot({path:`.ai-local/v031-${info.project.name}-overview.png`,fullPage:true});
-  await nav.getByRole('button',{name:'Servers',exact:true}).click();
+  await nav.getByRole('link',{name:'Servers',exact:true}).click();
   await expect(page.getByRole('heading',{name:'Servers',exact:true}).first()).toBeVisible();
-  await nav.getByRole('button',{name:'Services',exact:true}).click();
+  await nav.getByRole('link',{name:'Services',exact:true}).click();
   await expect(page.locator('.check-card')).toHaveCount(monitor.checks.length);
   for(const group of ['Applications','Infrastructure']) {
     const region=page.getByRole('region',{name:group,exact:true});
@@ -35,7 +35,7 @@ test('six sections, real checks and groupings, expanded trends, settings and com
   await expect(card.getByText(/Insufficient coverage|observed time reachable/)).toBeVisible();
   await expect(card.locator('.response-chart svg').first()).toBeVisible();
   await page.screenshot({path:`.ai-local/v031-${info.project.name}-services.png`,fullPage:true});
-  await nav.getByRole('button',{name:'Settings',exact:true}).click();
+  await nav.getByRole('link',{name:'Settings',exact:true}).click();
   await page.getByRole('tab',{name:'Notifications',exact:true}).click();
   await expect(page.getByRole('heading',{name:'Notification delivery',exact:true})).toBeVisible();
   await expect(page.getByText(/SMTP acceptance does not confirm inbox receipt/)).toBeVisible();
@@ -43,7 +43,7 @@ test('six sections, real checks and groupings, expanded trends, settings and com
   await expect(page.locator('input[type=password]')).toHaveCount(0);
   await expect(page.locator('.check-card')).toHaveCount(0);
   await page.screenshot({path:`.ai-local/v031-${info.project.name}-settings.png`,fullPage:true});
-  await nav.getByRole('button',{name:'Issues',exact:true}).click();
+  await nav.getByRole('link',{name:'Issues',exact:true}).click();
   await expect(page.getByRole('tab',{name:'Active',exact:true})).toHaveAttribute('aria-selected','true');
   await expect(page.getByRole('heading',{name:'Active issues',exact:true})).toBeVisible();
   const count=activeIssueCount(fleet.hosts,monitor);
@@ -78,7 +78,7 @@ test('real issue filtering and legacy bookmarks retain destination and browser h
   await expect(page.locator('.issue-record[data-issue-type=metric]')).toHaveCount(0);
   await page.goto('/#service='+monitor.checks[0].id);
   await expect(page.locator(`#service-${monitor.checks[0].id}`)).toHaveJSProperty('open',true);
-  await page.getByRole('button',{name:'Settings',exact:true}).click();
+  await page.getByRole('link',{name:'Settings',exact:true}).click();
   await page.goBack();
   await expect(page.locator(`#service-${monitor.checks[0].id}`)).toHaveJSProperty('open',true);
   for(const [url,type] of [['/alerts','metric'],['/incidents','availability']]) {

@@ -1,3 +1,4 @@
+import { TabList } from "./TabList";
 import { LogSettings } from './LogSettings';
 import { useEffect, useRef, useState } from "react";
 import type { Host } from "./types";
@@ -303,6 +304,7 @@ export function Settings({
         className="primary-button"
         type="submit"
         disabled={busy}
+        aria-busy={busy}
         onClick={saveAction}
       >
         Save changes
@@ -357,7 +359,7 @@ export function Settings({
       <p className="detail-description">
         Personalize this browser or manage application configuration.
       </p>
-      {session?.mode === "local" && <p><a href="/auth/logout">Sign out</a></p>}
+      {session?.mode === "local" && <p><a className="text-link" href="/auth/logout">Sign out</a></p>}
       {!session?.admin && (
         <p className="notice">
           {session?.configured
@@ -369,14 +371,13 @@ export function Settings({
       {data?.notifications.failed ? (
         <p className="notice danger">
           Delivery needs attention ·{" "}
-          <a href="#issues?type=notification">
+          <a className="text-link" href="#issues?type=notification">
             Investigate delivery failures →
           </a>
         </p>
       ) : null}
-      <div
+      <TabList
         className="settings-tabs"
-        role="tablist"
         aria-label="Settings sections"
       >
         {tabs.map((t) => (
@@ -384,12 +385,13 @@ export function Settings({
             role="tab"
             key={t}
             aria-selected={tab === t}
+            tabIndex={tab === t ? 0 : -1}
             onClick={() => changeTab(t)}
           >
             {t}
           </button>
         ))}
-      </div>
+      </TabList>
       {failure && (
         <p className="notice danger" role="alert">
           {failure}

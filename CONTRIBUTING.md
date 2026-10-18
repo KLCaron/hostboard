@@ -22,6 +22,8 @@ For interactive development, run setup after `npm run build`, using `node dist/s
 
 `HOSTBOARD_TEST_URL` optionally points Playwright at a read-only acceptance environment. Never run production mutation experiments; configuration tests create their own isolated store, signed identity and SMTP fixture. Browser screenshots/traces are Git-ignored by default. Public documentation screenshots use generic fixture data.
 
+Reuse the shared [UI interaction patterns](docs/interactions.md) for navigation, selection and disclosure controls.
+
 Open focused PRs with a problem description and meaningful validation. Keep AGPL licensing, null/gap semantics, explicit per-node query isolation, authorization/CSRF checks, pinned monitoring targets, and recoverable database migrations. Include paired upgrade/rollback tests for schema changes. Do not introduce live infrastructure, credentials, private environment files, or AI planning/tracking documents into commits. Public user documentation belongs in Git; local development notes remain ignored.
 
 Dependencies use the committed npm lockfile. `npm audit --audit-level=high` and `node scripts/check-licenses.mjs` run in CI; new licenses require an explicit review. Regenerate `THIRD_PARTY_NOTICES.txt` with `node scripts/generate-notices.mjs` after dependency changes. `Dependabot` proposes npm, Docker base and Actions updates. Changes to CI must preserve pinned action revisions, read-only pull-request permissions, and absence of production SSH credentials.

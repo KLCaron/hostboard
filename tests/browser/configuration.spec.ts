@@ -168,7 +168,7 @@ test("personal preferences save, cancel, defaults and landing page persist on th
   await expect(
     page.getByRole("heading", { name: "Services", exact: true }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByRole("link", { name: "Settings", exact: true }).click();
   await page
     .getByRole("button", { name: "Restore defaults", exact: true })
     .click();
