@@ -9,6 +9,12 @@ else
   release=$(cat "$root/previous-release")
 fi
 [[ -d "$release" && "$release" == "$root/releases/"* ]] || { echo 'Previous release not found' >&2; exit 1; }
+# Preserve all current configuration and history before older code can touch SQLite.
+python3 - "$root/data/monitor.sqlite" "$root/data/monitor.before-rollback-$(date -u +%Y%m%dT%H%M%SZ).sqlite" <<'PYBACKUP'
+import sqlite3,sys
+with sqlite3.connect(sys.argv[1]) as source,sqlite3.connect(sys.argv[2]) as destination:
+    source.backup(destination)
+PYBACKUP
 export HOSTBOARD_TAG=$(basename "$release")
 cd "$release"
 docker compose --env-file "$root/.env" up -d --no-build

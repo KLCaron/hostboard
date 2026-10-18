@@ -1,0 +1,10 @@
+{
+  "issuer": "https://YOUR-TEAM.cloudflareaccess.com",
+  "audience": "YOUR-APPLICATION-AUD-TAG",
+  "emails": ["admin@example.com"],
+  "origin": "https://hostboard.example.com",
+  "targets": [
+    { "host": "health.internal.example", "port": 443, "addresses": ["192.168.50.10"] },
+    { "host": "192.168.50.11", "port": 22, "addresses": ["192.168.50.11"] }
+  ]
+}

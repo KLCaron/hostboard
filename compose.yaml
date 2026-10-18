@@ -13,6 +13,7 @@ services:
       HOSTBOARD_CONFIG: /app/config/hosts.json
       HOSTBOARD_CHECKS: /app/config/checks.json
       HOSTBOARD_DB: /app/data/monitor.sqlite
+      HOSTBOARD_ADMIN_CONFIG: /app/private/admin.json
       HOSTBOARD_SMTP_CONFIG: /app/private/smtp.json
       HOSTBOARD_PUBLIC_URL: ${HOSTBOARD_PUBLIC_URL:-}
     volumes:

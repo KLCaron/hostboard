@@ -16,11 +16,11 @@ release="$(date -u +%Y%m%dT%H%M%SZ)-$(git rev-parse --short HEAD)"
 root=/srv/stacks/hostboard
 ssh "${ssh_args[@]}" "$target" "set -eu; if [ ! -d '$root' ]; then sudo -n install -d -o \"\$(id -un)\" -g \"\$(id -gn)\" '$root'; fi; mkdir -p '$root/releases/$release' '$root/config'; if [ -f '$root/.env' ]; then cp '$root/.env' '$root/.env.before-$release'; fi; if [ -f '$root/config/hosts.json' ]; then cp '$root/config/hosts.json' '$root/config/hosts.json.before-$release'; fi"
 # Only project source is transferred; local research, credentials and Git stay local.
-tar -czf - .dockerignore Dockerfile compose.yaml package.json package-lock.json tsconfig.json tsconfig.server.json vite.config.ts index.html public src server tests scripts deploy playwright.config.ts README.md LICENSE config/hosts.example.json config/checks.example.json config/smtp.example.json | ssh "${ssh_args[@]}" "$target" "tar -xzf - -C '$root/releases/$release'"
-scp "${ssh_args[@]}" .env "$target:$root/.env"
-scp "${ssh_args[@]}" config/hosts.json "$target:$root/config/hosts.json"
+tar -czf - .dockerignore Dockerfile compose.yaml package.json package-lock.json tsconfig.json tsconfig.server.json vite.config.ts index.html public src server tests scripts deploy playwright.config.ts README.md LICENSE config/hosts.example.json config/checks.example.json config/smtp.example.json config/admin.example.json | ssh "${ssh_args[@]}" "$target" "tar -xzf - -C '$root/releases/$release'"
+ssh "${ssh_args[@]}" "$target" "test -f '$root/.env'" || scp "${ssh_args[@]}" .env "$target:$root/.env"
+ssh "${ssh_args[@]}" "$target" "test -f '$root/config/hosts.json'" || scp "${ssh_args[@]}" config/hosts.json "$target:$root/config/hosts.json"
 ssh "${ssh_args[@]}" "$target" "if [ -f '$root/config/checks.json' ]; then cp '$root/config/checks.json' '$root/config/checks.json.before-$release'; fi"
-scp "${ssh_args[@]}" config/checks.json "$target:$root/config/checks.json"
+ssh "${ssh_args[@]}" "$target" "test -f '$root/config/checks.json'" || scp "${ssh_args[@]}" config/checks.json "$target:$root/config/checks.json"
 ssh "${ssh_args[@]}" "$target" "bash -s" -- "$release" <<'REMOTE'
 set -euo pipefail
 release=$1
