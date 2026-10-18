@@ -5,6 +5,8 @@ test('real fleet, deep links, historical controls, diagnostics and container inv
   await page.goto('/');
   await expect(page.getByRole('heading',{name:'Fleet overview'})).toBeVisible();
   const host=page.locator('.host-card').first();
+  expect(await page.locator('.stat-label').first().evaluate(el=>parseFloat(getComputedStyle(el).fontSize))).toBeGreaterThanOrEqual(12);
+  await expect(page.locator('.stat-note').first()).toHaveCSS('font-size','12px');
   await expect(host.getByText('Online',{exact:true})).toBeVisible();
   await expect(page.locator('.services-panel')).toHaveJSProperty('open',false);
   await host.getByRole('button',{name:'Explore host'}).click();
@@ -32,6 +34,17 @@ test('real fleet, deep links, historical controls, diagnostics and container inv
   await host.locator('tbody tr').first().getByRole('button',{name:'History & I/O →'}).click();
   await expect(page.getByRole('dialog')).toBeVisible();
   await expect(page.getByRole('dialog').getByText('Available retention:',{exact:false})).toBeVisible();
+  // Native dialog positioning must remain centered after CSS resets and scrolling.
+  const dialog = page.getByRole('dialog');
+  const bounds = await dialog.boundingBox();
+  const viewport = page.viewportSize()!;
+  expect(bounds).not.toBeNull();
+  expect(Math.abs(bounds!.x + bounds!.width / 2 - viewport.width / 2)).toBeLessThan(2);
+  expect(Math.abs(bounds!.y + bounds!.height / 2 - viewport.height / 2)).toBeLessThan(2);
+  expect(bounds!.y).toBeGreaterThanOrEqual(0);
+  expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(viewport.height);
+  await expect(dialog.getByRole('button', { name: 'Close investigation' })).toBeInViewport();
+  await page.screenshot({path:`.ai-local/${info.project.name}-dialog.png`});
   await page.getByRole('dialog').getByLabel('Investigation metric').selectOption({index:1});
   await expect(page.getByRole('dialog').getByText('Available retention:',{exact:false})).toBeVisible();
   await page.keyboard.press('Escape');await expect(page.getByRole('dialog')).not.toBeVisible();
