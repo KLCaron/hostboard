@@ -28,7 +28,7 @@ git checkout v0.5.1
 docker compose up -d --wait
 ```
 
-The setup CLI uses the published image. It prompts for the browser URL, published interface/port, data directory, Agent endpoints and exact node selectors, administrator credentials, and optional SMTP. It creates private configuration with restricted permissions and never opens a setup web server. Repeating setup preserves existing files; `--check` validates them.
+The setup CLI uses the published image. It prompts for the browser URL, published interface/port, data directory, Agent endpoints and exact node selectors, administrator credentials, and optional SMTP. It creates private configuration with restricted permissions and never opens a setup web server. Repeating setup preserves existing files; `--check` validates them. The wrapper supports data directories inside the project; for an absolute external directory, use the [additional setup bind mount](docs/installation.md#external-data-directories).
 
 By default, open **http://localhost:8088** on the Docker host and sign in with the credentials you chose. From another machine, use an SSH tunnel:
 

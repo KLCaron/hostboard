@@ -14,6 +14,22 @@ The CLI writes the invoking user's unprivileged UID/GID into `.env`. If invoked 
 
 For manual setup, copy `.env.example` and `config/hosts.example.json`, create an empty checks file, and follow [authentication](authentication.md) to create administrator configuration. The CLI is recommended because it generates the password hash and session secret correctly.
 
+## External data directories
+
+The `scripts/setup.sh` wrapper mounts only the project directory. Use `./data` or another directory **inside the project** with that wrapper. An absolute host directory must also be mounted into the setup container at the same path; otherwise setup cannot prepare the host's storage or its permissions.
+
+For a fresh installation using external storage, run this instead of `scripts/setup.sh`:
+
+```sh
+DATA_DIR="$HOME/hostboard-data"
+install -d -m 700 "$DATA_DIR"
+docker run --rm -it --user "$(id -u):$(id -g)" \
+  --volume "$PWD:/setup" --volume "$DATA_DIR:$DATA_DIR" --entrypoint node \
+  ghcr.io/klcaron/hostboard:0.5.1 dist/server/server/setup.js --directory /setup
+```
+
+Enter the exact absolute value of `DATA_DIR` at the persistent data directory prompt. Then run `./scripts/setup.sh --check` and `docker compose up -d --wait` normally. Use a path without spaces or shell syntax. This flow was verified with external SQLite storage, an unavailable Agent, and container recreation. Existing installations should stop Hostboard and retain a consistent backup before moving data or changing `HOSTBOARD_DATA_DIR`.
+
 ## HTTPS proxy
 
 Keep Hostboard published on loopback when a proxy runs on the Docker host. Forward the original Host header, and set `X-Forwarded-Proto: https` on HTTPS requests. Configure the **actual connecting proxy IP** in local `private/admin.json`'s `trustedProxies`; a host proxy normally appears as the Docker bridge gateway, rather than 127.0.0.1. Inspect your network to determine it. Do not use wildcard proxy trust. Set the `origin` and `HOSTBOARD_PUBLIC_URL` to the exact external HTTPS origin, then recreate Hostboard. A proxy on a separate machine needs access to the explicitly published private interface, with firewall restrictions.
