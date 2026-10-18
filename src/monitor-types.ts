@@ -1,5 +1,6 @@
 export type CheckState = 'up' | 'down' | 'pending' | 'unknown' | 'disabled';
 export interface CheckView {
+  generation?: number;
   id: string; name: string; hostId: string; container?: string; type: 'http' | 'tcp';
   group?: 'Applications' | 'Infrastructure'; lastSuccessfulAt?: number | null;
   state: CheckState; checkedAt: number | null; responseMs: number | null; reason: string;

@@ -22,7 +22,7 @@ test('standalone SQLite backup restores from read-only media and stdin, rejects 
   result=run('restore',file);assert.equal(result.status,0,result.stderr);
   let restored=new Configuration(live,ChecksSchema.parse({}));assert.equal(restored.settings().general.temperature,'C');restored.db.close();
   result=run('restore','-',readFileSync(file));assert.equal(result.status,0,result.stderr);
-  const future=path.join(dir,'future.sqlite'),f=new DatabaseSync(future);f.exec('PRAGMA user_version=2');f.close();
+  const future=path.join(dir,'future.sqlite'),f=new DatabaseSync(future);f.exec('PRAGMA user_version=3');f.close();
   const before=readFileSync(live);
   result=run('restore',future);assert.notEqual(result.status,0);assert.deepEqual(readFileSync(live),before);
   restored=new Configuration(live,ChecksSchema.parse({}));assert.equal(restored.settings().general.temperature,'C');restored.db.close();

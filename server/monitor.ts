@@ -1,3 +1,5 @@
+import { setImmediate as yieldTurn } from "node:timers/promises";
+import { migrateMonitor } from "./monitor-schema.js";
 import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import type { Settings } from "./settings.js";
@@ -33,7 +35,9 @@ type Outbox = {
   subject: string;
   body: string;
   attempts: number;
+  checkId: string;
 };
+type History = Pick<CheckView, "summary" | "trend" | "lastSuccessfulAt">;
 const seconds = () => Date.now() / 1000;
 const iso = (time: number) => new Date(time * 1000).toISOString();
 export class Monitor {
@@ -41,7 +45,10 @@ export class Monitor {
   private readonly namespace: string;
   private timer?: ReturnType<typeof setInterval>;
   private running = new Set<string>();
-  private sending = false;
+  private deliveries = new Map<
+    number,
+    { checkId: string; controller: AbortController }
+  >();
   private stopped = false;
   private lastTick = 0;
   private lastPrune = 0;
@@ -50,6 +57,8 @@ export class Monitor {
   deleted = new Set<string>();
   preferences?: Settings;
   policy?: TargetPolicy;
+  private histories = new Map<string, { at: number; value: History }>();
+  private historyWork?: Promise<void>;
   private epochs = new Map<string, number>();
   constructor(
     public config: ChecksConfig,
@@ -72,6 +81,7 @@ export class Monitor {
       CREATE TABLE IF NOT EXISTS notifications(id INTEGER PRIMARY KEY, incident INTEGER NOT NULL, checkId TEXT NOT NULL, event TEXT NOT NULL, state TEXT NOT NULL, subject TEXT NOT NULL, body TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, nextAttempt REAL NOT NULL, lastAttempt REAL, deliveredAt REAL, error TEXT, UNIQUE(incident,event));
       CREATE INDEX IF NOT EXISTS incident_time ON incidents(startedAt DESC);
       CREATE INDEX IF NOT EXISTS notification_due ON notifications(state,nextAttempt);`);
+    migrateMonitor(this.db);
     this.db
       .prepare(
         "INSERT OR IGNORE INTO metadata(key,value) VALUES('mailNamespace',?)",
@@ -97,62 +107,142 @@ export class Monitor {
     disabled = this.disabled,
     deleted = this.deleted,
   ) {
-    for (const check of config.checks) {
-      const {
-        group: _group,
-        name: _name,
-        notify: _notify,
-        cooldownSeconds: _cooldown,
-        severity: _severity,
-        ...evaluation
-      } = check;
-      const fingerprint = createHash("sha256")
-        .update(JSON.stringify(evaluation))
-        .digest("hex");
-      const old = this.state(check.id);
-      const previous = this.db
-        .prepare("SELECT fingerprint FROM check_evaluation WHERE id=?")
-        .get(check.id) as { fingerprint: string } | undefined;
-      if (
-        !this.epochs.has(check.id) ||
-        previous?.fingerprint !== fingerprint ||
-        this.disabled.has(check.id) !== disabled.has(check.id)
-      )
-        this.epochs.set(check.id, (this.epochs.get(check.id) ?? 0) + 1);
-      if (old && previous && previous.fingerprint !== fingerprint) {
-        if (old.active)
+    const oldEpochs = new Map(this.epochs);
+    const ownTransaction = !this.db.isTransaction;
+    if (ownTransaction) this.db.exec("BEGIN IMMEDIATE");
+    try {
+      for (const check of config.checks) {
+        const {
+          group: _group,
+          name: _name,
+          notify: _notify,
+          cooldownSeconds: _cooldown,
+          severity: _severity,
+          ...evaluation
+        } = check;
+        const fingerprint = createHash("sha256")
+          .update(JSON.stringify(evaluation))
+          .digest("hex");
+        const old = this.state(check.id);
+        const previous = this.db
+          .prepare(
+            "SELECT fingerprint,generation FROM check_evaluation WHERE id=?",
+          )
+          .get(check.id) as
+          | { fingerprint: string; generation: number }
+          | undefined;
+        if (
+          !this.epochs.has(check.id) ||
+          previous?.fingerprint !== fingerprint ||
+          this.disabled.has(check.id) !== disabled.has(check.id)
+        )
+          this.epochs.set(check.id, (this.epochs.get(check.id) ?? 0) + 1);
+        const changed = !!previous && previous.fingerprint !== fingerprint;
+        const generation = (previous?.generation ?? 1) + (changed ? 1 : 0);
+        if (changed) {
           this.db
             .prepare(
-              "UPDATE incidents SET endedAt=?,resolution='Check configuration changed',monitoringGap=1 WHERE id=?",
+              "UPDATE check_generations SET endedAt=? WHERE checkId=? AND generation=?",
             )
-            .run(now, old.active);
+            .run(now, check.id, previous!.generation);
+        }
         this.db
           .prepare(
-            "UPDATE checks SET checked=NULL,ok=NULL,failures=0,firstFailure=NULL,active=NULL WHERE id=?",
+            "INSERT OR IGNORE INTO check_generations(checkId,generation,fingerprint,startedAt) VALUES(?,?,?,?)",
           )
-          .run(check.id);
+          .run(check.id, generation, fingerprint, now);
+        if (old && changed) {
+          if (old.active)
+            this.db
+              .prepare(
+                "UPDATE incidents SET endedAt=?,resolution='Check configuration changed',monitoringGap=1 WHERE checkId=? AND endedAt IS NULL",
+              )
+              .run(now, check.id);
+          this.db
+            .prepare(
+              "UPDATE checks SET checked=NULL,ok=NULL,failures=0,firstFailure=NULL,active=NULL WHERE id=?",
+            )
+            .run(check.id);
+          this.db
+            .prepare(
+              "UPDATE notifications SET state='suppressed',error='Check configuration changed' WHERE checkId=? AND state IN ('pending','failed')",
+            )
+            .run(check.id);
+        }
+        // Preserve the v0.3.1 fingerprint format for unchanged-check rollback compatibility.
+        const { group: _legacyGroup, ...legacy } = check;
+        const legacyFingerprint = createHash("sha256")
+          .update(JSON.stringify(legacy))
+          .digest("hex");
         this.db
           .prepare(
-            "UPDATE notifications SET state='suppressed',error='Check configuration changed' WHERE checkId=? AND state IN ('pending','failed')",
+            "INSERT INTO checks(id,fingerprint) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET fingerprint=excluded.fingerprint",
           )
-          .run(check.id);
+          .run(check.id, legacyFingerprint);
+        this.db
+          .prepare(
+            "INSERT INTO check_evaluation(id,fingerprint,generation) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET fingerprint=excluded.fingerprint,generation=excluded.generation",
+          )
+          .run(check.id, fingerprint, generation);
       }
-      // Preserve the v0.3.1 fingerprint format for unchanged-check rollback compatibility.
-      const { group: _legacyGroup, ...legacy } = check;
-      const legacyFingerprint = createHash("sha256")
-        .update(JSON.stringify(legacy))
-        .digest("hex");
-      this.db
-        .prepare(
-          "INSERT INTO checks(id,fingerprint) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET fingerprint=excluded.fingerprint",
-        )
-        .run(check.id, legacyFingerprint);
-      this.db
-        .prepare(
-          "INSERT INTO check_evaluation VALUES(?,?) ON CONFLICT(id) DO UPDATE SET fingerprint=excluded.fingerprint",
-        )
-        .run(check.id, fingerprint);
+      for (const id of disabled) {
+        if (
+          !this.disabled.has(id) &&
+          this.db
+            .prepare(
+              "SELECT ok FROM samples WHERE checkId=? AND generation=(SELECT generation FROM check_evaluation WHERE id=?) ORDER BY time DESC LIMIT 1",
+            )
+            .get(id, id)?.ok != null
+        ) {
+          const check = config.checks.find((c) => c.id === id);
+          if (check)
+            this.db
+              .prepare(
+                "INSERT OR IGNORE INTO samples(checkId,time,ok,ms,interval,generation) VALUES(?,?,NULL,NULL,?,(SELECT generation FROM check_evaluation WHERE id=?))",
+              )
+              .run(id, now, check.intervalSeconds, id);
+        }
+        this.db
+          .prepare(
+            "UPDATE incidents SET monitoringGap=1 WHERE id=(SELECT active FROM checks WHERE id=?)",
+          )
+          .run(id);
+        this.db
+          .prepare(
+            "UPDATE checks SET checked=NULL,ok=NULL,failures=0,firstFailure=NULL WHERE id=?",
+          )
+          .run(id);
+      }
+      for (const id of deleted) {
+        this.db
+          .prepare(
+            "UPDATE incidents SET endedAt=?,resolution='Monitoring discontinued: check archived',monitoringGap=1 WHERE checkId=? AND endedAt IS NULL",
+          )
+          .run(now, id);
+        this.db
+          .prepare(
+            "UPDATE checks SET active=NULL,checked=NULL,ok=NULL WHERE id=?",
+          )
+          .run(id);
+        this.db
+          .prepare(
+            "UPDATE notifications SET state='suppressed',error='Monitoring discontinued: check archived' WHERE checkId=? AND state IN ('pending','failed')",
+          )
+          .run(id);
+      }
+      if (ownTransaction) this.db.exec("COMMIT");
+    } catch (error) {
+      if (ownTransaction) this.db.exec("ROLLBACK");
+      throw error;
     }
+    for (const [_, delivery] of this.deliveries) {
+      if (
+        deleted.has(delivery.checkId) ||
+        this.epochs.get(delivery.checkId) !== oldEpochs.get(delivery.checkId)
+      )
+        delivery.controller.abort();
+    }
+    this.histories.clear();
     this.config = config;
     this.disabled = disabled;
     this.deleted = deleted;
@@ -162,10 +252,16 @@ export class Monitor {
       .prepare("SELECT * FROM checks WHERE id=?")
       .get(id) as unknown as State | undefined;
   }
-  record(check: CheckConfig, result: ProbeResult, now = seconds()) {
+  record(
+    check: CheckConfig,
+    result: ProbeResult,
+    now = seconds(),
+    startedAt = now - (result.responseMs ?? 0) / 1000,
+  ) {
     const old = this.state(check.id)!;
     const gap =
-      old.checked !== null && now - old.checked > check.intervalSeconds * 1.5;
+      old.checked !== null &&
+      startedAt - old.checked > check.intervalSeconds * 1.5;
     let failures = result.ok === false ? (gap ? 0 : old.failures) + 1 : 0;
     let firstFailure =
       result.ok === false
@@ -178,7 +274,7 @@ export class Monitor {
     try {
       this.db
         .prepare(
-          "INSERT INTO samples(checkId,time,ok,ms,interval) VALUES(?,?,?,?,?)",
+          "INSERT INTO samples(checkId,time,ok,ms,interval,generation) VALUES(?,?,?,?,?,(SELECT generation FROM check_evaluation WHERE id=?))",
         )
         .run(
           check.id,
@@ -186,6 +282,7 @@ export class Monitor {
           result.ok === null ? null : Number(result.ok),
           result.responseMs,
           check.intervalSeconds,
+          check.id,
         );
       if (active && (gap || result.ok === null))
         this.db
@@ -199,7 +296,7 @@ export class Monitor {
         active = Number(
           this.db
             .prepare(
-              "INSERT INTO incidents(checkId,name,hostId,severity,startedAt,detectedAt,reason,lastReason,responseMs) VALUES(?,?,?,?,?,?,?,?,?)",
+              "INSERT INTO incidents(checkId,name,hostId,severity,startedAt,detectedAt,reason,lastReason,responseMs,generation) VALUES(?,?,?,?,?,?,?,?,?,(SELECT generation FROM check_evaluation WHERE id=?))",
             )
             .run(
               check.id,
@@ -211,6 +308,7 @@ export class Monitor {
               result.reason,
               result.reason,
               result.responseMs,
+              check.id,
             ).lastInsertRowid,
         );
         this.enqueue(
@@ -262,14 +360,16 @@ export class Monitor {
       for (const remote of result.watchdogHistory || []) {
         let mapping = this.db
           .prepare(
-            "SELECT incident FROM external_incidents WHERE checkId=? AND remoteId=?",
+            "SELECT incident FROM external_incidents WHERE checkId=? AND remoteId=? AND generation=(SELECT generation FROM check_evaluation WHERE id=?)",
           )
-          .get(check.id, remote.id) as { incident: number } | undefined;
+          .get(check.id, remote.id, check.id) as
+          | { incident: number }
+          | undefined;
         if (!mapping) {
           const id = Number(
             this.db
               .prepare(
-                "INSERT INTO incidents(checkId,name,hostId,severity,startedAt,detectedAt,endedAt,reason,lastReason,resolution) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO incidents(checkId,name,hostId,severity,startedAt,detectedAt,endedAt,reason,lastReason,resolution,generation) VALUES(?,?,?,?,?,?,?,?,?,?,(SELECT generation FROM check_evaluation WHERE id=?))",
               )
               .run(
                 check.id,
@@ -282,16 +382,19 @@ export class Monitor {
                 remote.reason,
                 remote.lastReason,
                 remote.endedAt ? "Reachability restored" : null,
+                check.id,
               ).lastInsertRowid,
           );
           this.db
-            .prepare("INSERT INTO external_incidents VALUES(?,?,?)")
-            .run(check.id, remote.id, id);
+            .prepare(
+              "INSERT INTO external_incidents(checkId,remoteId,incident,generation) VALUES(?,?,?,(SELECT generation FROM check_evaluation WHERE id=?))",
+            )
+            .run(check.id, remote.id, id, check.id);
           mapping = { incident: id };
         } else
           this.db
             .prepare(
-              "UPDATE incidents SET endedAt=?,lastReason=?,resolution=? WHERE id=?",
+              "UPDATE incidents SET endedAt=?,lastReason=?,resolution=? WHERE id=? AND (resolution IS NULL OR resolution='Reachability restored')",
             )
             .run(
               remote.endedAt,
@@ -371,133 +474,155 @@ export class Monitor {
         due,
       );
   }
-  async dispatch(now = seconds()) {
-    if (this.sending || !this.delivery) return;
-    this.sending = true;
-    try {
+  async dispatch(now = seconds(), budget = 5) {
+    if (!this.delivery || this.deliveries.size >= 5 || budget <= 0) return;
+    {
       // Disabled rows are deliberately not replayed automatically when a recipient is first configured.
       const rows = this.db
         .prepare(
-          "SELECT * FROM notifications WHERE state IN ('pending','failed') AND nextAttempt<=? ORDER BY id LIMIT 5",
+          `SELECT n.* FROM notifications n WHERE n.state IN ('pending','failed') AND n.nextAttempt<=? AND NOT EXISTS (SELECT 1 FROM notifications p WHERE p.checkId=n.checkId AND p.id<n.id AND p.state IN ('pending','failed')) AND n.id NOT IN (${[...this.deliveries.keys()].map(() => "?").join(",") || "-1"}) ORDER BY n.nextAttempt,n.id LIMIT ?`,
         )
-        .all(now) as unknown as Outbox[];
-      for (const row of rows) {
-        const target = this.db
-          .prepare("SELECT checkId FROM notifications WHERE id=?")
-          .get(row.id) as { checkId: string };
-        const definition = this.config.checks.find(
-          (c) => c.id === target.checkId,
-        );
-        if (
-          this.disabled.has(target.checkId) ||
-          !definition?.notify ||
-          this.preferences?.notifications.enabled === false ||
-          (row.event === "recovery" &&
-            this.preferences?.notifications.recovery === false) ||
-          (this.config.minimumSeverity === "critical" &&
-            definition.severity !== "critical")
-        ) {
-          this.db
-            .prepare(
-              "UPDATE notifications SET state='suppressed',error='Disabled by current notification or service preferences' WHERE id=?",
-            )
-            .run(row.id);
-          continue;
-        }
-        const earlier = this.db
-          .prepare(
-            "SELECT id FROM notifications WHERE checkId=(SELECT checkId FROM notifications WHERE id=?) AND id<? AND state IN ('pending','failed') LIMIT 1",
-          )
-          .get(row.id, row.id);
-        if (earlier) continue;
-        if (row.event === "outage") {
-          const check = this.config.checks.find(
-            (c) =>
-              c.id ===
-              (
-                this.db
-                  .prepare("SELECT checkId FROM notifications WHERE id=?")
-                  .get(row.id) as { checkId: string }
-              ).checkId,
-          );
-          const last = check && this.state(check.id)?.lastSent;
-          if (
-            check &&
-            last &&
-            last +
-              Math.max(
-                check.cooldownSeconds,
-                this.preferences?.notifications.cooldownSeconds ?? 0,
-              ) >
-              now
-          ) {
-            this.db
-              .prepare("UPDATE notifications SET nextAttempt=? WHERE id=?")
-              .run(
+        .all(
+          now,
+          ...this.deliveries.keys(),
+          Math.min(budget, 5 - this.deliveries.size),
+        ) as unknown as Outbox[];
+      for (const row of rows)
+        this.deliveries.set(row.id, {
+          checkId: row.checkId,
+          controller: new AbortController(),
+        });
+      await Promise.all(
+        rows.map(async (row) => {
+          try {
+            const target = this.db
+              .prepare("SELECT checkId FROM notifications WHERE id=?")
+              .get(row.id) as { checkId: string };
+            const definition = this.config.checks.find(
+              (c) => c.id === target.checkId,
+            );
+            if (
+              this.disabled.has(target.checkId) ||
+              !definition?.notify ||
+              this.preferences?.notifications.enabled === false ||
+              (row.event === "recovery" &&
+                this.preferences?.notifications.recovery === false) ||
+              (this.config.minimumSeverity === "critical" &&
+                definition.severity !== "critical")
+            ) {
+              this.db
+                .prepare(
+                  "UPDATE notifications SET state='suppressed',error='Disabled by current notification or service preferences' WHERE id=?",
+                )
+                .run(row.id);
+              return;
+            }
+            const earlier = this.db
+              .prepare(
+                "SELECT id FROM notifications WHERE checkId=(SELECT checkId FROM notifications WHERE id=?) AND id<? AND state IN ('pending','failed') LIMIT 1",
+              )
+              .get(row.id, row.id);
+            if (earlier) return;
+            if (row.event === "outage") {
+              const check = this.config.checks.find(
+                (c) =>
+                  c.id ===
+                  (
+                    this.db
+                      .prepare("SELECT checkId FROM notifications WHERE id=?")
+                      .get(row.id) as { checkId: string }
+                  ).checkId,
+              );
+              const last = check && this.state(check.id)?.lastSent;
+              if (
+                check &&
+                last &&
                 last +
                   Math.max(
                     check.cooldownSeconds,
                     this.preferences?.notifications.cooldownSeconds ?? 0,
-                  ),
-                row.id,
-              );
-            continue;
-          }
-        }
-        this.db
-          .prepare(
-            "UPDATE notifications SET attempts=attempts+1,lastAttempt=? WHERE id=?",
-          )
-          .run(now, row.id);
-        try {
-          const target = this.db
-            .prepare("SELECT checkId FROM notifications WHERE id=?")
-            .get(row.id) as { checkId: string };
-          const current = this.state(target.checkId);
-          const definition = this.config.checks.find(
-            (c) => c.id === target.checkId,
-          );
-          const fresh =
-            current?.checked !== null &&
-            current?.checked !== undefined &&
-            definition &&
-            now - current.checked <= definition.intervalSeconds * 1.5;
-          const state =
-            !fresh || current?.ok === null
-              ? "unknown (monitoring unavailable)"
-              : current?.ok === 1
-                ? "reachable"
-                : "unreachable";
-          await this.delivery.send({
-            ...row,
-            messageKey: `${this.namespace}-${row.id}`,
-            body: row.body + `\nCurrent observed state at delivery: ${state}\n`,
-          });
-          this.db
-            .prepare(
-              "UPDATE notifications SET state='delivered',deliveredAt=?,error=NULL WHERE id=?",
-            )
-            .run(now, row.id);
-          if (row.event === "outage")
+                  ) >
+                  now
+              ) {
+                this.db
+                  .prepare(
+                    "UPDATE notifications SET nextAttempt=? WHERE id=? AND state IN ('pending','failed')",
+                  )
+                  .run(
+                    last +
+                      Math.max(
+                        check.cooldownSeconds,
+                        this.preferences?.notifications.cooldownSeconds ?? 0,
+                      ),
+                    row.id,
+                  );
+                return;
+              }
+            }
             this.db
               .prepare(
-                "UPDATE checks SET lastSent=? WHERE id=(SELECT checkId FROM notifications WHERE id=?)",
+                "UPDATE notifications SET attempts=attempts+1,lastAttempt=? WHERE id=?",
               )
               .run(now, row.id);
-        } catch {
-          // SMTP exceptions can contain usernames, recipients or server responses. Store a safe summary only.
-          this.db
-            .prepare(
-              "UPDATE notifications SET state='failed',error='SMTP delivery failed; retry scheduled',nextAttempt=? WHERE id=?",
-            )
-            .run(
-              now + Math.min(900, 30 * 2 ** Math.min(row.attempts, 5)),
-              row.id,
-            );
-        }
-      }
-    } finally {
-      this.sending = false;
+            try {
+              const target = this.db
+                .prepare("SELECT checkId FROM notifications WHERE id=?")
+                .get(row.id) as { checkId: string };
+              const current = this.state(target.checkId);
+              const definition = this.config.checks.find(
+                (c) => c.id === target.checkId,
+              );
+              const fresh =
+                current?.checked !== null &&
+                current?.checked !== undefined &&
+                definition &&
+                now - current.checked <=
+                  definition.intervalSeconds * 1.5 +
+                    definition.timeoutMs / 1000;
+              const state =
+                !fresh || current?.ok === null
+                  ? "unknown (monitoring unavailable)"
+                  : current?.ok === 1
+                    ? "reachable"
+                    : "unreachable";
+              await this.delivery!.send(
+                {
+                  ...row,
+                  messageKey: `${this.namespace}-${row.id}`,
+                  body:
+                    row.body +
+                    `\nCurrent observed state at delivery: ${state}\n`,
+                },
+                this.deliveries.get(row.id)!.controller.signal,
+              );
+              this.db
+                .prepare(
+                  "UPDATE notifications SET state='delivered',deliveredAt=?,error=NULL WHERE id=? AND state IN ('pending','failed')",
+                )
+                .run(now, row.id);
+              if (row.event === "outage")
+                this.db
+                  .prepare(
+                    "UPDATE checks SET lastSent=? WHERE id=(SELECT checkId FROM notifications WHERE id=?)",
+                  )
+                  .run(now, row.id);
+            } catch {
+              // SMTP exceptions can contain usernames, recipients or server responses. Store a safe summary only.
+              this.db
+                .prepare(
+                  "UPDATE notifications SET state='failed',error='SMTP delivery failed; retry scheduled',nextAttempt=? WHERE id=? AND state IN ('pending','failed')",
+                )
+                .run(
+                  now + Math.min(900, 30 * 2 ** Math.min(row.attempts, 5)),
+                  row.id,
+                );
+            }
+          } finally {
+            this.deliveries.delete(row.id);
+          }
+        }),
+      );
+      if (rows.length) await this.dispatch(now, budget - rows.length);
     }
   }
   start() {
@@ -505,15 +630,30 @@ export class Monitor {
       if (this.stopped) return;
       this.lastTick = seconds();
       if (this.lastTick - this.lastPrune > 3600) {
-        this.db
-          .prepare("DELETE FROM samples WHERE time<?")
+        const pruned = this.db
+          .prepare(
+            "DELETE FROM samples WHERE rowid IN (SELECT rowid FROM samples WHERE time<? ORDER BY time LIMIT 5000)",
+          )
           .run(
             this.lastTick -
               (this.preferences?.retention.sampleDays ?? 30) * 86400,
           );
-        this.lastPrune = this.lastTick;
+        if (Number(pruned.changes) < 5000) this.lastPrune = this.lastTick;
       }
-      for (const check of this.config.checks) {
+      const due = this.config.checks.map((check) => ({
+        check,
+        state: this.state(check.id)!,
+      }));
+      due.sort(
+        (a, b) =>
+          (a.state.checked === null
+            ? -Infinity
+            : a.state.checked + a.check.intervalSeconds) -
+          (b.state.checked === null
+            ? -Infinity
+            : b.state.checked + b.check.intervalSeconds),
+      );
+      for (const { check } of due) {
         if (this.disabled.has(check.id)) continue;
         if (this.running.size >= 8) break;
         const state = this.state(check.id)!;
@@ -525,6 +665,7 @@ export class Monitor {
           continue;
         this.running.add(check.id);
         const epoch = this.epochs.get(check.id);
+        const startedAt = this.lastTick;
         void probe(check, this.policy)
           .then((result) => {
             if (
@@ -535,6 +676,8 @@ export class Monitor {
               this.record(
                 this.config.checks.find((c) => c.id === check.id)!,
                 result,
+                seconds(),
+                startedAt,
               );
               this.storageError = false;
             }
@@ -555,6 +698,8 @@ export class Monitor {
   }
   stop() {
     this.stopped = true;
+    for (const delivery of this.deliveries.values())
+      delivery.controller.abort();
     clearInterval(this.timer);
   }
   healthy(now = seconds()) {
@@ -573,76 +718,195 @@ export class Monitor {
         })
     );
   }
-  view(now = seconds(), before = Number.MAX_SAFE_INTEGER): MonitorView {
+  private history(
+    c: CheckConfig,
+    now: number,
+    generation = (
+      this.db
+        .prepare("SELECT generation FROM check_evaluation WHERE id=?")
+        .get(c.id) as { generation: number }
+    ).generation,
+  ): History {
+    const window = 86400,
+      after = now - window;
+    const samples = this.db
+      .prepare(
+        "SELECT time,ok,ms,interval FROM samples WHERE checkId=? AND generation=? AND time>=? ORDER BY time",
+      )
+      .all(c.id, generation, after - 3600 * 1.5) as unknown as {
+      time: number;
+      ok: number | null;
+      ms: number | null;
+      interval: number;
+    }[];
+    let up = 0,
+      down = 0;
+    samples.forEach((v, i) => {
+      const span = Math.max(
+        0,
+        Math.min(now, samples[i + 1]?.time ?? now, v.time + v.interval * 1.5) -
+          Math.max(after, v.time),
+      );
+      if (v.ok === 1) up += span;
+      else if (v.ok === 0) down += span;
+    });
+    // At least an hour of observations and 80% coverage is needed for a meaningful daily percentage.
+    const observed = up + down;
+    const buckets = Array.from({ length: 144 }, () => ({
+      count: 0,
+      valid: 0,
+      sum: 0,
+      failed: false,
+      unknown: false,
+    }));
+    for (const v of samples) {
+      const index = Math.floor((v.time - after) / 600);
+      if (index < 0 || index >= 144) continue;
+      const bucket = buckets[index];
+      bucket.count++;
+      if (v.ms !== null) {
+        bucket.valid++;
+        bucket.sum += v.ms;
+      }
+      if (v.ok === 0) bucket.failed = true;
+      if (v.ok === null) bucket.unknown = true;
+    }
+    const trend: CheckView["trend"] = buckets.map((b, i) => ({
+      time: after + i * 600,
+      responseMs: b.valid ? b.sum / b.valid : null,
+      ok: !b.count || (b.unknown && !b.failed) ? null : !b.failed,
+    }));
+    return {
+      lastSuccessfulAt: (
+        this.db
+          .prepare(
+            "SELECT MAX(time) AS time FROM samples WHERE checkId=? AND generation=? AND ok=1",
+          )
+          .get(c.id, generation) as { time: number | null }
+      ).time,
+      summary: {
+        windowSeconds: window,
+        observedSeconds: observed,
+        upSeconds: up,
+        downSeconds: down,
+        unknownSeconds: window - observed,
+        availability:
+          observed >= Math.max(3600, window * 0.8)
+            ? (100 * up) / observed
+            : null,
+        since: samples[0]?.time ?? null,
+      },
+      trend,
+    };
+  }
+  historyFor(id: string, generation: number, now = seconds()) {
+    const check = this.config.checks.find((c) => c.id === id);
+    const revision = this.db
+      .prepare(
+        "SELECT generation,startedAt,endedAt FROM check_generations WHERE checkId=? AND generation=?",
+      )
+      .get(id, generation) as
+      | { generation: number; startedAt: number | null; endedAt: number | null }
+      | undefined;
+    if (!check || !revision) return null;
+    return {
+      checkId: id,
+      ...revision,
+      ...this.history(
+        check,
+        Math.min(now, revision.endedAt ?? now),
+        generation,
+      ),
+    };
+  }
+  generations(id: string) {
+    return this.db
+      .prepare(
+        "SELECT generation,startedAt,endedAt FROM check_generations WHERE checkId=? ORDER BY generation",
+      )
+      .all(id);
+  }
+  // Yield between checks; concurrent clients share one short-lived history computation.
+  // Current states always come directly from observations, independently of this cache.
+  async viewAsync(now = seconds(), before = Number.MAX_SAFE_INTEGER) {
+    if (!this.historyWork) {
+      this.historyWork = (async () => {
+        for (const c of this.config.checks) {
+          if (this.deleted.has(c.id)) continue;
+          const key = `${c.id}:${this.epochs.get(c.id)}`;
+          const cached = this.histories.get(key);
+          if (!cached || now - cached.at >= 5) {
+            this.histories.set(key, { at: now, value: this.history(c, now) });
+            await yieldTurn();
+          }
+        }
+      })().finally(() => {
+        this.historyWork = undefined;
+      });
+    }
+    await this.historyWork;
+    const histories = new Map<string, History>();
+    for (const c of this.config.checks) {
+      const cached = this.histories.get(`${c.id}:${this.epochs.get(c.id)}`);
+      // A config edit during the yielding calculation must never inherit a previous identity.
+      if (cached) histories.set(c.id, cached.value);
+      else
+        histories.set(c.id, {
+          lastSuccessfulAt: null,
+          summary: {
+            windowSeconds: 86400,
+            observedSeconds: 0,
+            upSeconds: 0,
+            downSeconds: 0,
+            unknownSeconds: 86400,
+            availability: null,
+            since: null,
+          },
+          trend: [],
+        });
+    }
+    return this.view(now, before, histories);
+  }
+  view(
+    now = seconds(),
+    before = Number.MAX_SAFE_INTEGER,
+    histories?: Map<string, History> | false,
+  ): MonitorView {
     const checks: CheckView[] = this.config.checks
       .filter((c) => !this.deleted.has(c.id))
       .map((c) => {
         const s = this.state(c.id)!;
         const stale =
-          s.checked === null || now - s.checked > c.intervalSeconds * 1.5;
-        const window = 86400,
-          after = now - window;
-        const samples = this.db
-          .prepare(
-            "SELECT time,ok,ms,interval FROM samples WHERE checkId=? AND time>=? ORDER BY time",
-          )
-          .all(c.id, after - c.intervalSeconds * 1.5) as unknown as {
-          time: number;
-          ok: number | null;
-          ms: number | null;
-          interval: number;
-        }[];
-        let up = 0,
-          down = 0;
-        samples.forEach((v, i) => {
-          const span = Math.max(
-            0,
-            Math.min(
-              now,
-              samples[i + 1]?.time ?? now,
-              v.time + v.interval * 1.5,
-            ) - Math.max(after, v.time),
-          );
-          if (v.ok === 1) up += span;
-          else if (v.ok === 0) down += span;
-        });
-        // At least an hour of observations and 80% coverage is needed for a meaningful daily percentage.
-        const observed = up + down;
-        const trend: CheckView["trend"] = [];
-        for (let i = 0; i < 144; i++) {
-          const start = after + i * 600;
-          const bucket = samples.filter(
-            (v) => v.time >= start && v.time < start + 600,
-          );
-          const valid = bucket.filter((v) => v.ms !== null);
-          trend.push({
-            time: start,
-            responseMs: valid.length
-              ? valid.reduce((n, v) => n + v.ms!, 0) / valid.length
-              : null,
-            ok: bucket.length
-              ? bucket.some((v) => v.ok === 0)
-                ? false
-                : bucket.every((v) => v.ok === 1)
-                  ? true
-                  : null
-              : null,
-          });
-        }
+          s.checked === null ||
+          now - s.checked > c.intervalSeconds * 1.5 + c.timeoutMs / 1000;
+        const history =
+          histories === false
+            ? {
+                lastSuccessfulAt: null,
+                summary: {
+                  windowSeconds: 86400,
+                  observedSeconds: 0,
+                  upSeconds: 0,
+                  downSeconds: 0,
+                  unknownSeconds: 86400,
+                  availability: null,
+                  since: null,
+                },
+                trend: [],
+              }
+            : (histories?.get(c.id) ?? this.history(c, now));
         return {
+          generation: (
+            this.db
+              .prepare("SELECT generation FROM check_evaluation WHERE id=?")
+              .get(c.id) as { generation: number }
+          ).generation,
           id: c.id,
           name: c.name,
           hostId: c.hostId,
           container: c.container,
           type: c.type,
           group: c.group,
-          lastSuccessfulAt: (
-            this.db
-              .prepare(
-                "SELECT MAX(time) AS time FROM samples WHERE checkId=? AND ok=1",
-              )
-              .get(c.id) as { time: number | null }
-          ).time,
           state: this.disabled.has(c.id)
             ? "disabled"
             : stale || s.ok === null
@@ -670,19 +934,7 @@ export class Monitor {
               c.severity !== "critical"
             ),
           activeIncident: s.active,
-          summary: {
-            windowSeconds: window,
-            observedSeconds: observed,
-            upSeconds: up,
-            downSeconds: down,
-            unknownSeconds: window - observed,
-            availability:
-              observed >= Math.max(3600, window * 0.8)
-                ? (100 * up) / observed
-                : null,
-            since: samples[0]?.time ?? null,
-          },
-          trend,
+          ...history,
         };
       });
     const incidentViews = (rows: IncidentView[]) =>

@@ -17,7 +17,10 @@ import { localAuthentication } from "./local-auth.js";
 import { configAPI, synchronize } from "./config-api.js";
 process.umask(0o077);
 const admin = loadAdmin();
-if (!admin) throw Error("Administrator configuration is missing. Run scripts/setup.sh before starting Hostboard.");
+if (!admin)
+  throw Error(
+    "Administrator configuration is missing. Run scripts/setup.sh before starting Hostboard.",
+  );
 const agents = loadConfig().hosts.map((host) => new Agent(host));
 const seed = loadChecks(agents.map((a) => a.config.id));
 const configuration = new Configuration(
@@ -42,14 +45,27 @@ app.use((_req, res, next) => {
   });
   next();
 });
-app.get("/api/health", (_req, res) => res.status(monitor.healthy() ? 200 : 503).json({status: monitor.healthy() ? "ok" : "unavailable"}));
+app.get("/api/health", (_req, res) =>
+  res
+    .status(monitor.healthy() ? 200 : 503)
+    .json({ status: monitor.healthy() ? "ok" : "unavailable" }),
+);
 app.get("/api/monitor-health", (_req, res) =>
   res
     .status(monitor.healthy() ? 200 : 503)
     .json({ status: monitor.healthy() ? "ok" : "unavailable" }),
 );
-const stopSessions = admin.mode === "local" ? localAuthentication(app, admin) : () => {};
-app.use("/api", rateLimit({ windowMs: 60000, limit: 600, standardHeaders: "draft-8", legacyHeaders: false }));
+const stopSessions =
+  admin.mode === "local" ? localAuthentication(app, admin) : () => {};
+app.use(
+  "/api",
+  rateLimit({
+    windowMs: 60000,
+    limit: 600,
+    standardHeaders: "draft-8",
+    legacyHeaders: false,
+  }),
+);
 app.use("/api", (_req, res, next) => {
   res.set("Cache-Control", "no-store");
   next();
@@ -67,7 +83,7 @@ app.use(
 );
 app.get("/api/system", async (_req, res) => {
   const hosts = await Promise.all(agents.map((a) => a.current()));
-  const view = monitor.view();
+  const view = monitor.view(undefined, undefined, false);
   res.json({
     version: JSON.parse(readFileSync(path.resolve("package.json"), "utf8"))
       .version,
@@ -99,7 +115,7 @@ app.get("/api/system", async (_req, res) => {
   });
 });
 
-app.get("/api/monitor", (req, res) => {
+app.get("/api/monitor", async (req, res) => {
   const before = req.query.before;
   if (
     before !== undefined &&
@@ -111,17 +127,34 @@ app.get("/api/monitor", (req, res) => {
     return;
   }
   res.json(
-    monitor.view(undefined, before === undefined ? undefined : Number(before)),
+    await monitor.viewAsync(
+      undefined,
+      before === undefined ? undefined : Number(before),
+    ),
   );
 });
-app.get("/api/incidents/:id", (req, res) => {
+// Authenticated in local mode, behind Access in Cloudflare mode, like other history reads.
+app.get("/api/checks/:id/history", (req, res) => {
+  const generation = req.query.generation;
+  if (typeof generation !== "string" || !/^[1-9]\d{0,8}$/.test(generation)) {
+    res.status(400).json({ error: "Choose a historical generation" });
+    return;
+  }
+  const history = monitor.historyFor(req.params.id, Number(generation));
+  if (!history) {
+    res.status(404).json({ error: "Unknown check generation" });
+    return;
+  }
+  res.json({ ...history, generations: monitor.generations(req.params.id) });
+});
+app.get("/api/incidents/:id", async (req, res) => {
   if (!/^\d{1,15}$/.test(req.params.id)) {
     res.status(400).json({ error: "Invalid incident ID" });
     return;
   }
   const id = Number(req.params.id);
   const incident = monitor
-    .view(undefined, id + 1)
+    .view(undefined, id + 1, false)
     .incidents.find((i) => i.id === id);
   if (!incident) {
     res.status(404).json({ error: "Unknown incident" });
@@ -215,8 +248,11 @@ app.use("/api", (_req, res) =>
   res.status(404).json({ error: "Unknown endpoint" }),
 );
 app.use(((error, _req, res, _next) => {
-  console.error("Request failed:", error instanceof Error ? error.name : "Unknown error");
-  res.status(500).json({error: "Request failed. Check the server logs."});
+  console.error(
+    "Request failed:",
+    error instanceof Error ? error.name : "Unknown error",
+  );
+  res.status(500).json({ error: "Request failed. Check the server logs." });
 }) as express.ErrorRequestHandler);
 const client = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -241,7 +277,10 @@ app.get(
 );
 const bind = process.env.HOSTBOARD_BIND || "127.0.0.1",
   port = Number(process.env.PORT || 3001);
-if (!privateBind(bind) && !(bind === "0.0.0.0" && process.env.HOSTBOARD_CONTAINER === "1"))
+if (
+  !privateBind(bind) &&
+  !(bind === "0.0.0.0" && process.env.HOSTBOARD_CONTAINER === "1")
+)
   throw new Error(
     "HOSTBOARD_BIND must be loopback, a private LAN address, or a VPN address",
   );
@@ -249,8 +288,9 @@ if (!Number.isInteger(port) || port < 1024 || port > 65535)
   throw new Error("PORT must be between 1024 and 65535");
 // Same-host proxies can use localhost while browsers on the LAN use the
 // configured private address. Never bind all interfaces to enable both.
-const addresses =
-  ["127.0.0.1", "::1", "0.0.0.0"].includes(bind) ? [bind] : [bind, "127.0.0.1"];
+const addresses = ["127.0.0.1", "::1", "0.0.0.0"].includes(bind)
+  ? [bind]
+  : [bind, "127.0.0.1"];
 let listening = 0;
 const servers = addresses.map((address) =>
   app.listen(port, address, () => {

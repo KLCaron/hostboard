@@ -73,7 +73,7 @@ export class Configuration {
     const schema = this.db.prepare("PRAGMA user_version").get() as {
       user_version: number;
     };
-    if (schema.user_version > 1) {
+    if (schema.user_version > 2) {
       this.db.close();
       throw Error(
         "Configuration database was created by a newer Hostboard release",
@@ -86,7 +86,7 @@ export class Configuration {
       CREATE TABLE IF NOT EXISTS config_audit(id INTEGER PRIMARY KEY,time REAL NOT NULL,actor TEXT NOT NULL,action TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS action_limits(action TEXT PRIMARY KEY,time REAL NOT NULL);
       CREATE TABLE IF NOT EXISTS mail_tests(id INTEGER PRIMARY KEY,time REAL NOT NULL,state TEXT NOT NULL);
-      PRAGMA user_version=1;`);
+      PRAGMA user_version=${Math.max(1,schema.user_version)};`);
     if (!this.db.prepare("SELECT id FROM app_settings WHERE id=1").get())
       this.atomic(() => {
         const initial = structuredClone(defaults);

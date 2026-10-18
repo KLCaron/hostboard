@@ -184,7 +184,7 @@ test("configuration imports ten checks once, persists across restarts, retains i
   synchronize(store, monitor);
   assert.equal(monitor.view(1100).checks.length, 10);
   assert.equal(
-    monitor.db.prepare("SELECT count(*) n FROM samples").get()?.n,
+    monitor.db.prepare("SELECT count(*) n FROM samples WHERE ok IS NOT NULL").get()?.n,
     1,
   );
   store.db.close();
@@ -597,6 +597,7 @@ test("general and presentation updates preserve in-flight unrelated checks; disa
   m.configure(m.config, undefined, new Set([c.id]));
   release!();
   await new Promise((r) => setTimeout(r, 50));
-  assert.equal(m.db.prepare("SELECT COUNT(*) n FROM samples").get()?.n, 1);
+  assert.equal(m.db.prepare("SELECT COUNT(*) n FROM samples WHERE ok IS NOT NULL").get()?.n, 1);
+  assert.equal(m.db.prepare("SELECT COUNT(*) n FROM samples WHERE ok IS NULL").get()?.n, 1, "disable records an explicit unknown boundary");
   assert.equal(m.view().checks[0].state, "disabled");
 });
