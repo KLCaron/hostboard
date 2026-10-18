@@ -12,6 +12,7 @@ import smtplib
 import sqlite3
 import ssl
 import time
+import uuid
 
 
 class Queue:
@@ -21,6 +22,7 @@ class Queue:
         self.db = sqlite3.connect(filename, timeout=60)
         self.db.row_factory = sqlite3.Row
         self.db.executescript('''PRAGMA journal_mode=WAL;
+          CREATE TABLE IF NOT EXISTS metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL);
           CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY,key TEXT,event TEXT,subject TEXT,body TEXT,state TEXT,attempts INTEGER DEFAULT 0,next REAL,last_attempt REAL,delivered REAL,error TEXT,incident INTEGER,cooldown INTEGER DEFAULT 900);
           CREATE TABLE IF NOT EXISTS states(key TEXT PRIMARY KEY,down INTEGER,started REAL,last_sent REAL,reason TEXT);
           CREATE TABLE IF NOT EXISTS incidents(id INTEGER PRIMARY KEY,key TEXT,name TEXT,startedAt REAL,detectedAt REAL,endedAt REAL,reason TEXT,lastReason TEXT);
@@ -29,6 +31,9 @@ class Queue:
             self.db.execute('ALTER TABLE events ADD COLUMN incident INTEGER')
         if 'cooldown' not in [r['name'] for r in self.db.execute('PRAGMA table_info(events)')]:
             self.db.execute('ALTER TABLE events ADD COLUMN cooldown INTEGER DEFAULT 900')
+        with self.db:
+            self.db.execute("INSERT OR IGNORE INTO metadata VALUES('mailNamespace',?)", (uuid.uuid4().hex,))
+        self.namespace = self.db.execute("SELECT value FROM metadata WHERE key='mailNamespace'").fetchone()['value']
 
     def transition(self, key, label, down, reason, now=None, started=None, cooldown=None):
         now = time.time() if now is None else now
@@ -69,7 +74,7 @@ class Queue:
         message['To'] = ', '.join(config['to'])
         message['Subject'] = row['subject']
         message['Date'] = formatdate(localtime=False)
-        message['Message-ID'] = f'<hostboard-{os.uname().nodename}-{row["id"]}@{config["from"].split("@")[1]}>'
+        message['Message-ID'] = f'<hostboard-{os.uname().nodename}-{self.namespace}-{row["id"]}@{config["from"].split("@")[1]}>'
         latest = self.db.execute('SELECT down FROM states WHERE key=?', (row['key'],)).fetchone()
         body = row['body']
         if latest:

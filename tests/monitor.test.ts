@@ -154,3 +154,15 @@ test('scheduler observes a real application outage and recovery while HTTP proce
   await until(()=>m.view().checks[0].state==='up');
   assert.equal(m.view().incidents.length,1);assert.notEqual(m.view().incidents[0].endedAt,null);
 });
+
+test('delivery identities survive retry/restart and differ between independent databases',async t=>{
+  const dir=mkdtempSync(path.join(tmpdir(),'hostboard-identities-'));t.after(()=>rmSync(dir,{recursive:true,force:true}));
+  const attempted:Message[]=[];let fail=true;
+  const delivery={provider:'test',send:async(message:Message)=>{attempted.push(message);if(fail)throw Error('Controlled failure');}};
+  const config=ChecksSchema.parse({checks:[{...check,failureThreshold:1}]});
+  let m=new Monitor(config,path.join(dir,'one.sqlite'),delivery,1000);
+  m.record(config.checks[0],bad,1000);await m.dispatch(1000);m.db.close();
+  m=new Monitor(config,path.join(dir,'one.sqlite'),delivery,1040);fail=false;await m.dispatch(1040);m.db.close();
+  m=new Monitor(config,path.join(dir,'two.sqlite'),delivery,1040);m.record(config.checks[0],bad,1040);await m.dispatch(1040);m.db.close();
+  assert(attempted[0].messageKey);assert.equal(attempted[0].messageKey,attempted[1].messageKey);assert.notEqual(attempted[1].messageKey,attempted[2].messageKey);
+});

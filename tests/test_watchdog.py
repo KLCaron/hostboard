@@ -96,6 +96,19 @@ class WatchdogTests(unittest.TestCase):
             finally:
                 process.terminate(); process.wait(timeout=5)
 
+    def test_delivery_identity_persists_and_is_unique_per_database(self):
+        with tempfile.TemporaryDirectory() as d:
+            filename = str(Path(d) / 'one.sqlite')
+            queue = Queue(filename)
+            namespace = queue.namespace
+            queue.db.close()
+            queue = Queue(filename)
+            self.assertEqual(queue.namespace, namespace)
+            queue.db.close()
+            queue = Queue(str(Path(d) / 'two.sqlite'))
+            self.assertNotEqual(queue.namespace, namespace)
+            queue.db.close()
+
     def test_native_netdata_critical_recovery_deduplication(self):
         with tempfile.TemporaryDirectory() as d:
             queue = Queue(str(Path(d) / 'queue.sqlite'), str(Path(d) / 'missing'))

@@ -108,7 +108,8 @@ def main():
     state = evaluate(previous, ok, reason, time.time(), int(os.environ.get('HOSTBOARD_WATCH_THRESHOLD', '3')))
     queue = Queue(str(destination.with_name('notifications.sqlite')))
     if ok or state['confirmedDown']:
-        queue.transition('hostboard-availability', os.environ['HOSTBOARD_WATCH_HOST'] + ' / Hostboard availability', not ok, reason, started=state['startedAt'], cooldown=int(os.environ.get('HOSTBOARD_WATCH_COOLDOWN', '900')))
+        label = os.environ.get('HOSTBOARD_WATCH_LABEL', os.environ['HOSTBOARD_WATCH_HOST'] + ' / Hostboard availability')
+        queue.transition('hostboard-availability', label, not ok, reason, started=state['startedAt'], cooldown=int(os.environ.get('HOSTBOARD_WATCH_COOLDOWN', '900')))
     state['notifications'] = queue.flush(limit=1)
     state['incidents'] = queue.history()
     temporary = destination.with_suffix('.tmp')

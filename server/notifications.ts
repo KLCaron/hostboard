@@ -6,7 +6,7 @@ const SmtpSchema = z.object({
   host: z.string().min(1), port: z.union([z.literal(465), z.literal(587)]).default(587),
   username: z.email(), password: z.string().min(1), from: z.email(), to: z.array(z.email()).min(1),
 });
-export interface Message { id: number; subject: string; body: string }
+export interface Message { id: number; messageKey?: string; subject: string; body: string }
 export interface Delivery { send(message: Message): Promise<void>; provider: string }
 export function smtpDelivery(): Delivery | null {
   const file = process.env.HOSTBOARD_SMTP_CONFIG || 'config/smtp.json';
@@ -21,7 +21,7 @@ export function smtpDelivery(): Delivery | null {
   return { provider: 'SMTP', async send(message) {
     const result = await transport.sendMail({
       from: config.from, to: config.to, subject: message.subject, text: message.body,
-      messageId: `<hostboard-${message.id}@${config.from.split('@')[1]}>`,
+      messageId: `<hostboard-${message.messageKey || message.id}@${config.from.split('@')[1]}>`,
       disableFileAccess: true, disableUrlAccess: true,
     });
     if (result.rejected.length || !result.accepted.length) throw new Error('SMTP recipient rejected');

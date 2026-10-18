@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { ChecksConfig, CheckConfig } from './check-config.js';
 import { probe, type ProbeResult } from './probe.js';
 import type { Delivery } from './notifications.js';
@@ -13,6 +13,7 @@ const seconds = () => Date.now() / 1000;
 const iso = (time: number) => new Date(time * 1000).toISOString();
 export class Monitor {
   readonly db: DatabaseSync;
+  private readonly namespace: string;
   private timer?: ReturnType<typeof setInterval>;
   private running = new Set<string>();
   private sending = false;
@@ -24,6 +25,7 @@ export class Monitor {
     if (filename !== ':memory:') mkdirSync(path.dirname(filename), { recursive: true, mode: 0o700 });
     this.db = new DatabaseSync(filename);
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000;
+      CREATE TABLE IF NOT EXISTS metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS checks(id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, checked REAL, failures INTEGER NOT NULL DEFAULT 0, firstFailure REAL, active INTEGER, ok INTEGER, ms REAL, reason TEXT NOT NULL DEFAULT 'Not checked yet', lastSent REAL);
       CREATE TABLE IF NOT EXISTS samples(checkId TEXT NOT NULL, time REAL NOT NULL, ok INTEGER, ms REAL, interval REAL NOT NULL, PRIMARY KEY(checkId,time));
       CREATE TABLE IF NOT EXISTS incidents(id INTEGER PRIMARY KEY, checkId TEXT NOT NULL, name TEXT NOT NULL, hostId TEXT NOT NULL, severity TEXT NOT NULL, startedAt REAL NOT NULL, detectedAt REAL NOT NULL, endedAt REAL, reason TEXT NOT NULL, lastReason TEXT NOT NULL, responseMs REAL, resolution TEXT, monitoringGap INTEGER NOT NULL DEFAULT 0);
@@ -31,6 +33,8 @@ export class Monitor {
       CREATE TABLE IF NOT EXISTS notifications(id INTEGER PRIMARY KEY, incident INTEGER NOT NULL, checkId TEXT NOT NULL, event TEXT NOT NULL, state TEXT NOT NULL, subject TEXT NOT NULL, body TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, nextAttempt REAL NOT NULL, lastAttempt REAL, deliveredAt REAL, error TEXT, UNIQUE(incident,event));
       CREATE INDEX IF NOT EXISTS incident_time ON incidents(startedAt DESC);
       CREATE INDEX IF NOT EXISTS notification_due ON notifications(state,nextAttempt);`);
+    this.db.prepare("INSERT OR IGNORE INTO metadata(key,value) VALUES('mailNamespace',?)").run(randomUUID());
+    this.namespace = (this.db.prepare("SELECT value FROM metadata WHERE key='mailNamespace'").get() as { value: string }).value;
     const enabled = new Set(config.checks.map(c => c.id));
     for (const row of this.db.prepare('SELECT * FROM checks').all() as unknown as State[]) {
       if (!enabled.has(row.id)) this.retire(row, now);
@@ -112,7 +116,7 @@ export class Monitor {
           const definition = this.config.checks.find(c => c.id === target.checkId);
           const fresh = current?.checked !== null && current?.checked !== undefined && definition && now - current.checked <= definition.intervalSeconds * 1.5;
           const state = !fresh || current?.ok === null ? 'unknown (monitoring unavailable)' : current?.ok === 1 ? 'reachable' : 'unreachable';
-          await this.delivery.send({ ...row, body: row.body + `\nCurrent observed state at delivery: ${state}\n` });
+          await this.delivery.send({ ...row, messageKey: `${this.namespace}-${row.id}`, body: row.body + `\nCurrent observed state at delivery: ${state}\n` });
           this.db.prepare("UPDATE notifications SET state='delivered',deliveredAt=?,error=NULL WHERE id=?").run(now, row.id);
           if (row.event === 'outage') this.db.prepare('UPDATE checks SET lastSent=? WHERE id=(SELECT checkId FROM notifications WHERE id=?)').run(now, row.id);
         } catch {
