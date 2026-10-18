@@ -140,6 +140,8 @@ def main():
             repeated = subprocess.run(['bash','scripts/setup.sh'],cwd=root,env=setup_env,stdin=subprocess.DEVNULL)
             assert repeated.returncode != 0 and before == (root/'private/admin.json').read_bytes()
             envfile = root/'.env'
+            version = json.loads((root/'package.json').read_text())['version']
+            assert f'HOSTBOARD_IMAGE=ghcr.io/klcaron/hostboard:{version}\n' in envfile.read_text(), 'Setup selected an obsolete release'
             envfile.write_text(re.sub(r'^HOSTBOARD_IMAGE=.*$', 'HOSTBOARD_IMAGE='+initial, envfile.read_text(), flags=re.MULTILINE))
             compose('config', '--quiet')
             compose('up','-d','--wait','--wait-timeout','90','hostboard')
