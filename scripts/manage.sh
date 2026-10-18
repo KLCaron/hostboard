@@ -48,7 +48,7 @@ case "$command" in
     cp -a "$source_dir/config/." config/
     rm -f private/admin.json private/smtp.json
     cp -a "$source_dir/private/." private/
-    "${compose[@]}" run --rm --no-deps -T --volume "$source_dir:/backup:ro" --entrypoint node hostboard dist/server/server/maintenance.js restore /backup/monitor.sqlite
+    "${compose[@]}" run --rm --no-deps -T --entrypoint node hostboard dist/server/server/maintenance.js restore - < "$source_dir/monitor.sqlite"
     "${compose[@]}" up -d --wait --wait-timeout 120 hostboard
     ;;
   *) echo 'Usage: scripts/manage.sh backup NEW_DIR | upgrade IMAGE NEW_DIR | rollback BACKUP_DIR'; exit 1 ;;

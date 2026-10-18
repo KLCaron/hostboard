@@ -1,6 +1,7 @@
 import { DatabaseSync, backup } from "node:sqlite";
-import { chmodSync, copyFileSync, existsSync, mkdirSync, rmSync, renameSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, rmSync, renameSync, createWriteStream } from "node:fs";
 import path from "node:path";
+import { pipeline } from "node:stream/promises";
 import { randomUUID } from "node:crypto";
 process.umask(0o077);
 const [command, file] = process.argv.slice(2);
@@ -21,7 +22,9 @@ if (command === "backup") {
   // Run only while the application is stopped. The host helper enforces this.
   if (path.resolve(file) === path.resolve(live)) throw Error("Restore source must be a separate file");
   const temporary = `${live}.restore-${randomUUID()}`;
-  copyFileSync(file, temporary); chmodSync(temporary,0o600);
+  if (file === "-") await pipeline(process.stdin, createWriteStream(temporary, {flags:"wx",mode:0o600}));
+  else copyFileSync(file, temporary);
+  chmodSync(temporary,0o600);
   const source = new DatabaseSync(temporary);
   try {
     source.exec("PRAGMA journal_mode=DELETE");

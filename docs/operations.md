@@ -33,7 +33,7 @@ If a failed migration prevents startup entirely, online backup cannot run. Stop 
 
 ```sh
 # BACKUP_DIR must be an absolute path to a paired backup. Application must be stopped.
-docker compose run --rm --no-deps -T --volume "$BACKUP_DIR:/backup:ro" --entrypoint node hostboard dist/server/server/maintenance.js restore /backup/monitor.sqlite
+docker compose run --rm --no-deps -T --entrypoint node hostboard dist/server/server/maintenance.js restore - < "$BACKUP_DIR/monitor.sqlite"
 docker compose up -d --wait
 ```
 
