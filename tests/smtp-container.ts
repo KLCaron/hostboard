@@ -41,9 +41,11 @@ try {
   await delivery.send({id:1,messageKey:'test-1',subject:'Controlled test',body:'Fixture only'});
   assert.equal(accepted,1);
   stall=true;const controller=new AbortController();
+  const began=performance.now();
   const pending=delivery.send({id:2,subject:'Must cancel',body:'Fixture only'},controller.signal);
   const timer=setTimeout(()=>controller.abort(),100);
   await assert.rejects(pending);clearTimeout(timer);
+  assert(performance.now()-began<1000,"cancellation must finish before SMTP socket timeout");
   await new Promise(r=>setTimeout(r,100));assert.equal(accepted,1);
   assert.equal(sockets.size,0,'cancellation releases the stalled SMTP socket');
   console.log('PASS: isolated verified STARTTLS/authenticated send and abort releases stalled socket; no real email');

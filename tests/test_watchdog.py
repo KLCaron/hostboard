@@ -148,6 +148,7 @@ class WatchdogTests(unittest.TestCase):
             config=Path(d)/'smtp.json'
             config.write_text(json.dumps(dict(host='fixture',port=587,username='fixture',password='fixture-only',to=['recipient@example.test'],**{'from':'sender@example.test'})))
             closed=threading.Event()
+            tls_hosts=[];send_attempts=[]
             class Socket:
                 def shutdown(self,how): closed.set()
             class Client:
@@ -157,9 +158,11 @@ class WatchdogTests(unittest.TestCase):
                 def __exit__(self,*args): pass
                 def ehlo(self): pass
                 def starttls(self,**kwargs):
-                    if self._host != 'fixture': raise AssertionError('TLS hostname missing on deferred connect')
+                    tls_hosts.append(getattr(self,'_host',None))
+                    if tls_hosts[-1] != 'fixture': raise OSError('TLS hostname missing on deferred connect')
                 def login(self,*args): pass
                 def send_message(self,*args):
+                    send_attempts.append(True)
                     if not closed.wait(2): raise AssertionError('Deadline did not interrupt transport')
                     raise OSError('controlled private transport error')
                 def close(self): closed.set()
@@ -172,8 +175,11 @@ class WatchdogTests(unittest.TestCase):
             queue.transition('bad','Bad',True,'failure',1000,cooldown=0)
             queue.transition('good','Good',True,'failure',1000,cooldown=0)
             real_timer=threading.Timer
+            began=time.monotonic()
             with mock.patch('notify.smtplib.SMTP',Client),mock.patch('notify.threading.Timer',lambda delay,fn:real_timer(.02,fn)):
                 queue.flush(1000,limit=3)
+            self.assertLess(time.monotonic()-began,.5)
+            self.assertEqual(tls_hosts,['fixture']);self.assertEqual(send_attempts,[True])
             self.assertTrue(closed.is_set());self.assertEqual(sent,['good'])
             self.assertEqual(queue.summary(),{'delivered':1,'failed':1});queue.db.close()
 
