@@ -39,6 +39,34 @@ for (const h of fleet.hosts) {
         `${h.name}/${range}: no ${metric} samples`,
       );
   }
+  const alerts = await fetchApi(`/api/hosts/${h.id}/alerts`);
+  assert.deepEqual(alerts.errors, [], `${h.name}: alert investigation errors`);
+  for (const a of alerts.resolved) {
+    assert.equal(a.state, 'CLEAR');
+    assert.ok(a.duration === null || a.duration >= 0);
+  }
+  const diagnostics = await fetchApi(`/api/hosts/${h.id}/diagnostics`);
+  const catalog = await fetchApi(`/api/hosts/${h.id}/metrics`);
+  const cpu = catalog.find(c => c.context === 'system.cpu');
+  assert.ok(cpu);
+  const now = Math.floor(Date.now()/1000);
+  const history = await fetchApi(`/api/hosts/${h.id}/metric-history?chart=${encodeURIComponent(cpu.id)}&after=${now-86400}&before=${now}`);
+  assert.deepEqual(history.errors, []);
+  assert.ok(history.points.length > 0 && history.points.length <= 300);
+  assert.ok(history.retention.first > 0 && history.retention.last > 0);
+  for (const p of history.points) {
+    if (p['busy:min'] !== null && p['busy:max'] !== null) {
+      assert.ok(p['busy:min'] <= p['busy:max']);
+      assert.ok(p['busy:max'] <= 100.1 && p['busy:min'] >= -0.1);
+    }
+  }
+  // Verify a real available diagnostic and container dimension without requiring
+  // optional collectors on every installation.
+  for (const metric of [diagnostics.find(d => d.context.includes('pressure')), catalog.find(c => c.context === 'cgroup.mem_usage')].filter(Boolean)) {
+    const result = await fetchApi(`/api/hosts/${h.id}/metric-history?chart=${encodeURIComponent(metric.id)}&after=${now-3600}&before=${now}`);
+    assert.deepEqual(result.errors, []);
+    assert.ok(result.dimensions.length > 0);
+  }
   console.log(
     `${h.name}: online; live metrics and all four historical ranges verified; ${h.containers.length} containers, ${h.sensors.length} sensors, ${h.alerts?.length ?? 'unknown'} active alert types`,
   );

@@ -57,13 +57,19 @@ The configuration file must be readable by container uid 1000. Store tokens in e
 - Reported temperature sensors, with the warmest sensor in the host summary.
 - Active Netdata warning and critical alert summaries, including affected instance counts.
 
-Historical ranges are 15 minutes, 1 hour, 6 hours and 24 hours. CPU, memory, network, disk I/O and load charts contain up to 180 averaged samples. Retention and available history depend on the Agent.
+Overview ranges are 15 minutes, 1 hour, 6 hours and 24 hours. CPU sparklines show bucket peaks derived from minimum idle, avoiding sums of unrelated component peaks. Other overview sparklines show averages. Open a host or alert for detailed investigation.
+
+Detailed charts request at most 240 buckets per aggregation (minimum, average, maximum), per selected chart. CPU busy is derived as `100 - idle`, with extrema inverted. Other metrics show each dimension separately; directional network/disk/swap rates use positive magnitudes. Netdata performs time aggregation using its storage tiers. Summing component maxima would overstate a simultaneous total and is deliberately avoided. A displayed average is the mean of returned bucket averages, not a sample-weighted incident statistic.
+
+Use presets, a custom past window (30 seconds–31 days), zoom buttons, pan buttons, or the chart brush followed by **Zoom to brushed selection**. Zooming and panning pause the chart. **Resume live** returns to a moving preset window. Current host snapshots continue updating while an investigation is paused. Range, selected metric and container sorting preferences are saved in browser storage. Direct host links use `#host=<id>`.
+
+Each detailed chart reports available retention and returned bucket resolution. Retention varies by metric, node and tier. Missing samples remain gaps; spikes shorter than collection or retained resolution cannot be recovered. Removed containers or charts may no longer have discoverable labels, even if some data remains in Netdata.
 
 Live metrics refresh every 10 seconds; history refreshes every 30 seconds. The backend caches snapshots for 8 seconds, history for 25 seconds and metadata for one minute. Requests use timeouts and deduplication.
 
 Missing metrics remain empty. Chart gaps are not filled. Hosts without fresh CPU samples are marked stale; failed Agent connections are marked offline. Browser data becomes stale after 30 seconds without a successful refresh. Fleet totals exclude offline and stale hosts, so check host coverage when reading them.
 
-The integration uses `/api/v3/nodes`, `/api/v3/contexts`, `/api/v3/data` and `/api/v3/alerts`. The compatibility `/host/{machine-guid}/api/v1/charts` endpoint supplies per-instance filesystem, container and cgroup labels. See the [Netdata API documentation](https://learn.netdata.cloud/docs/developer-and-contributor-corner/rest-api).
+The integration uses `/api/v3/nodes`, `/api/v3/contexts`, `/api/v3/data`, `/api/v3/alerts`, `/api/v3/alert_transitions` and `/api/v3/alert_config`. The compatibility `/host/{machine-guid}/api/v1/charts` endpoint supplies per-instance filesystem, container and cgroup labels. See the [Netdata API documentation](https://learn.netdata.cloud/docs/developer-and-contributor-corner/rest-api).
 
 ## Development and checks
 
@@ -74,6 +80,8 @@ npm ci
 npm run dev      # Vite on 5173; API on loopback 3001
 npm test         # Normalization, node isolation, caching and failure handling
 npm run build    # TypeScript checks and production frontend/backend
+npx playwright install firefox
+npm run test:browser # Firefox desktop and mobile; requires running app + real Agents
 npm start        # Serve the production build
 ```
 
@@ -98,4 +106,26 @@ To roll back, check out the previous release and rebuild the Compose service. Pr
 
 ## Current limitations
 
-The MVP does not provide alert acknowledgement, notification delivery, container control, custom metric exploration or historical backfill. Missing collectors and unmatched container labels result in unavailable values. No Netdata Cloud account is required.
+Hostboard does not provide alert acknowledgement, container control or historical backfill. Missing collectors and unmatched container labels result in unavailable values. No Netdata Cloud account is required.
+
+## Investigation and diagnostics
+
+The Alerts view shows individual active warning/critical instances and recently resolved incidents from up to 200 transitions over the last seven days per host (50 resolved rows maximum). Netdata may retain less history. Thresholds are displayed as the original warning/critical expressions, including dynamic thresholds; unavailable expressions are labelled. Active start time defaults to the last state change and follows retained warning/critical transitions when possible. Resolved duration uses Netdata's raised duration. Removed or uninitialized states are not presented as successful resolutions. Click an incident for its resource chart and a window around the event. Alert calculations can use rolling windows or expressions that differ from raw chart dimensions.
+
+Host details contain a Diagnostics tab for CPU load/PSI, memory some/full PSI, swap capacity/activity, OOM kill rate, disk throughput/latency, I/O PSI and inode counts. PSI is stalled task time, not utilization. OOM is a rate, not a cumulative kill count. Device layers and filesystem mounts can overlap. Temperatures are separated into CPU, storage and other sensors based on Agent labels; unidentified sensors remain in the other group.
+
+Container tables sort by name, CPU or resident memory. Select a container for CPU, memory, network and disk history where collected. A collapsed Services section associates containers with their hosts and distinguishes process state from configured Docker health checks. Application availability remains explicitly unknown unless independently checked. No Docker socket is mounted. The service presentation can later accept independent check results without changing Netdata collection.
+
+Detailed data loads only when needed. Investigation responses are cached for 25 seconds, concurrent identical queries are deduplicated, and historical cache entries are bounded. All metric IDs must exist in the configured node's catalog. Browser requests never select arbitrary upstream URLs.
+
+## Notifications and independent availability
+
+Netdata evaluates alerts independently of Hostboard and continues when the dashboard is closed. Notification delivery requires a working Agent notification method and destination, or separately verified Netdata Cloud notification routing. An active alert, an `EXEC_RUN` flag, or a present sendmail binary does not prove a recipient received a message. Inspect `/api/v1/info` notification methods, the effective `health_alarm_notify.conf`, transport configuration and delivery logs. Configure recipients and credentials privately, then explicitly test delivery after recipient approval. Hostboard does not duplicate Netdata's alert engine or send external notifications.
+
+An optional independent watchdog is provided in `scripts/watchdog.py` with systemd units under `deploy/`. Install it on a different machine with Python 3 and private access to Hostboard. Copy the script to `/usr/local/lib/hostboard-watchdog.py`, copy the units to `/etc/systemd/system/`, and create `/etc/hostboard-watchdog.env` using the example. Enable with `systemctl enable --now hostboard-watchdog.timer` after `systemctl daemon-reload`.
+
+The watchdog checks Hostboard HTTP health, fresh fleet output and the hosting server's Agent status every minute. It writes `/var/lib/hostboard-watchdog/status.json` and systemd journal entries; failures exit nonzero. It does not verify public authentication or deliver notifications. View results with `journalctl -u hostboard-watchdog.service` and `systemctl status hostboard-watchdog.timer`. Remove with `systemctl disable --now hostboard-watchdog.timer`, then remove its units, script and environment file. External delivery can later use approved Netdata notification destinations or a systemd failure handler.
+
+Browser tests use real Agent data and inject request failures to exercise error states. Alert browser checks investigate available active and resolved incidents, or verify the corresponding empty states. Set `HOSTBOARD_TEST_URL` to verify another running instance. Tests do not bundle demonstration metrics.
+
+Release helpers are included as `scripts/deploy.sh` and `scripts/rollback.sh`. Deployment validates SSH host identity, runs backend tests and the production build, retains tagged Docker images and previous release source, and restores the previous image if startup fails. Browser acceptance checks are a separate pre/post-deployment step. Only the Hostboard Compose service is recreated; Netdata storage is untouched. The runtime image includes the AGPL-3.0 license.

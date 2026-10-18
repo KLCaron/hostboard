@@ -30,3 +30,6 @@ credentials/
 CLAUDE.md
 GEMINI.md
 .cursor/
+
+__pycache__/
+*.pyc

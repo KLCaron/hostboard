@@ -1,0 +1,17 @@
+[Unit]
+Description=Independent Hostboard and hosting-server availability check
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+DynamicUser=yes
+EnvironmentFile=/etc/hostboard-watchdog.env
+ExecStart=/usr/bin/python3 /usr/local/lib/hostboard-watchdog.py
+StateDirectory=hostboard-watchdog
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+RestrictAddressFamilies=AF_INET AF_INET6
+TimeoutStartSec=40
