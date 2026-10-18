@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Host } from "./types";
 import type { MonitorView } from "./monitor-types";
 import type { Settings as Values } from "../server/settings";
@@ -173,8 +173,15 @@ export function Settings({
     setRecipientText(c.settings.notifications.recipients.join(", "));
     return c;
   }
+  const previousDisplay = useRef(display);
   useEffect(() => {
-    setPersonal(display);
+    const previous = previousDisplay.current;
+    previousDisplay.current = display;
+    // Refresh inherited values only while the personal draft is unchanged.
+    // A late defaults response or another tab must not discard active edits.
+    setPersonal((current) =>
+      JSON.stringify(current) === JSON.stringify(previous) ? display : current,
+    );
   }, [display]);
   useEffect(() => {
     let active = true;

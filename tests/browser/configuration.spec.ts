@@ -116,7 +116,25 @@ async function fixture(request: APIRequestContext) {
 }
 test("personal preferences save, cancel, defaults and landing page persist on this browser", async ({
   page,
+  request,
 }) => {
+  const defaults = await (await request.get("/api/preferences")).json();
+  let releaseDefaults!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    releaseDefaults = resolve;
+  });
+  let delayed = false;
+  await page.route("**/api/preferences", async (route) => {
+    if (delayed) {
+      await route.continue();
+      return;
+    }
+    delayed = true;
+    await gate;
+    await route.fulfill({
+      json: { general: { ...defaults.general, refreshSeconds: 29 } },
+    });
+  });
   await page.goto("/#settings");
   await page.getByLabel("Temperature units", { exact: true }).selectOption("F");
   await page
@@ -125,6 +143,15 @@ test("personal preferences save, cancel, defaults and landing page persist on th
   await page
     .getByLabel("Default landing page", { exact: true })
     .selectOption("services");
+  // Loading application defaults must not replace an in-progress personal draft.
+  const loaded = page.waitForResponse("**/api/preferences");
+  releaseDefaults();
+  await loaded;
+  await expect(page.locator("footer")).toContainText("Refreshes every 29s");
+  await expect(page.getByLabel("Temperature units")).toHaveValue("F");
+  await expect(page.getByLabel("Dashboard refresh (seconds)")).toHaveValue(
+    "30",
+  );
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
   await expect(page.getByRole("status")).toContainText(
     "Personal preferences saved",
