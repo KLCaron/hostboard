@@ -20,9 +20,13 @@ jobs:
       - run: node scripts/check-licenses.mjs
       - run: npm test
       - run: npm run build
+      - run: npm run test:reliability-integration
       - run: npx playwright install --with-deps firefox
       - run: npm run test:browser
       - run: docker build -t hostboard:ci .
+      - run: python3 tests/smtp_container.py
+        env:
+          HOSTBOARD_TEST_IMAGE: hostboard:ci
       - run: npm run test:image-browser
         env:
           HOSTBOARD_TEST_IMAGE: hostboard:ci

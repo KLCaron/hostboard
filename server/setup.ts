@@ -78,7 +78,7 @@ async function main() {
   const write = (file: string, value: unknown) => writeFileSync(path.join(dir,file), JSON.stringify(value,null,2)+"\n", {mode:0o600,flag:"wx"});
   write("config/hosts.json", hosts); write("config/checks.json",checks); write("private/admin.json", admin);
   if (smtp) write("private/smtp.json",smtp);
-  writeFileSync(path.join(dir,".env"), `HOSTBOARD_IMAGE=ghcr.io/klcaron/hostboard:0.5.1\nHOSTBOARD_UID=${process.getuid?.() || 1000}\nHOSTBOARD_GID=${process.getgid?.() || 1000}\nHOSTBOARD_BIND=${bind}\nHOSTBOARD_PORT=${port}\nHOSTBOARD_PUBLIC_URL=${admin.origin}\nHOSTBOARD_DATA_DIR=${dataDir}\nHOSTBOARD_PRIVATE_DIR=./private\n`, {mode:0o600,flag:"wx"});
+  writeFileSync(path.join(dir,".env"), `HOSTBOARD_IMAGE=ghcr.io/klcaron/hostboard:0.5.2\nHOSTBOARD_UID=${process.getuid?.() || 1000}\nHOSTBOARD_GID=${process.getgid?.() || 1000}\nHOSTBOARD_BIND=${bind}\nHOSTBOARD_PORT=${port}\nHOSTBOARD_PUBLIC_URL=${admin.origin}\nHOSTBOARD_DATA_DIR=${dataDir}\nHOSTBOARD_PRIVATE_DIR=./private\n`, {mode:0o600,flag:"wx"});
   // node in the image is uid 1000. Other operators can grant this uid access explicitly.
   chmodSync(path.join(dir,"private"),0o700);
   if (process.getuid?.() === 0) {

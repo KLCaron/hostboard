@@ -25,7 +25,7 @@ DATA_DIR="$HOME/hostboard-data"
 install -d -m 700 "$DATA_DIR"
 docker run --rm -it --user "$(id -u):$(id -g)" \
   --volume "$PWD:/setup" --volume "$DATA_DIR:$DATA_DIR" --entrypoint node \
-  ghcr.io/klcaron/hostboard:0.5.1 dist/server/server/setup.js --directory /setup
+  ghcr.io/klcaron/hostboard:0.5.2 dist/server/server/setup.js --directory /setup
 ```
 
 Enter the exact absolute value of `DATA_DIR` at the persistent data directory prompt. Then run `./scripts/setup.sh --check` and `docker compose up -d --wait` normally. Use a path without spaces or shell syntax. This flow was verified with external SQLite storage, an unavailable Agent, and container recreation. Existing installations should stop Hostboard and retain a consistent backup before moving data or changing `HOSTBOARD_DATA_DIR`.
@@ -54,3 +54,9 @@ HOSTBOARD_IMAGE=hostboard:local ./scripts/setup.sh
 ```
 
 Set `HOSTBOARD_IMAGE=hostboard:local` in the generated `.env` before `docker compose up -d --wait`. Published images avoid this build step. Architecture support is Linux amd64/arm64; Docker Desktop and other operating systems are not part of the release acceptance matrix.
+
+## Independent watchdog and authentication
+
+Run the optional watchdog on a different machine with private connectivity to Hostboard and the required Netdata Agents. Use `deploy/hostboard-watchdog.env.example` and the supplied service/timer units. Configure `HOSTBOARD_WATCH_AGENTS` as a JSON array of private Agent origins and exact node selectors. In **both local and Cloudflare modes**, this recommended setup checks only Hostboard's status-only health endpoints and reads fresh, node-verified CPU observations directly from Netdata. It needs no Hostboard administrator password, browser session, or machine API credential. Protect Agent network access and keep the watchdog's own SMTP credentials on the independent host.
+
+The protected `/api/fleet` API remains authenticated in local mode. Omitting `HOSTBOARD_WATCH_AGENTS` retains the legacy fleet check only for a trusted private Cloudflare-mode origin; it cannot work against a local-login installation or a public Access login URL. `HOSTBOARD_WATCH_REQUIRE_MONITOR=0` skips only the scheduler-specific request; it does not grant fleet access. Check watchdog status freshness as well as Hostboard's own health so a stopped independent timer is visible. Existing watchdog/Netdata notification paths must remain active during upgrades.

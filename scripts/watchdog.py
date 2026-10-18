@@ -10,6 +10,8 @@ import socket
 import sys
 import time
 import urllib.request
+import urllib.parse
+import math
 from notify import Queue
 
 
@@ -19,10 +21,33 @@ def fetch(url, timeout=8):
             return None
     try:
         with urllib.request.build_opener(NoRedirect).open(url, timeout=timeout) as response:
-            return json.load(response)
+            payload = response.read(16 * 1024 * 1024 + 1)
+            if len(payload) > 16 * 1024 * 1024: raise ValueError("Monitoring response exceeds size limit")
+            return json.loads(payload)
     except urllib.error.HTTPError as error:
         error.close()
         raise ValueError('Monitoring endpoint returned an unsuccessful HTTP status') from None
+
+
+def check_agents(agents):
+    if not isinstance(agents,list) or not 1 <= len(agents) <= 20:
+        raise ValueError('Configure between one and twenty independent Netdata Agents')
+    for agent in agents:
+        origin = agent['url'].rstrip('/')
+        parsed = urllib.parse.urlsplit(origin)
+        if parsed.scheme not in ('http','https') or parsed.username or parsed.password or parsed.query or parsed.fragment or parsed.path:
+            raise ValueError('Use a private Agent HTTP(S) origin without credentials')
+        nodes = fetch(origin+'/api/v3/nodes')['nodes']
+        matches = [n for n in nodes if agent['node'] in (n.get('mg'),n.get('nd'),n.get('nm'))]
+        if len(matches)!=1: raise ValueError('Independent Netdata node selector did not match exactly one node')
+        guid = matches[0]['mg']
+        query = urllib.parse.urlencode(dict(nodes=guid,contexts='system.cpu',after=-60,points=1,format='json',group_by='instance,dimension',options='jsonwrap',timeout=5000))
+        data = fetch(origin+'/api/v3/data?'+query)
+        if [n.get('mg') for n in data.get('summary',{}).get('nodes',[])] != [guid]:
+            raise ValueError('Independent Netdata response belongs to a different node')
+        rows = data.get('result',{}).get('data',[])
+        if not any(len(row)>1 and isinstance(row[0],(int,float)) and -5 <= time.time()-row[0] <= 60 and any(isinstance(v,(int,float)) and math.isfinite(v) for v in row[1:]) for row in rows):
+            raise ValueError('Independent Netdata CPU metrics are unavailable or stale')
 
 
 def check(url, host_id):
@@ -30,6 +55,11 @@ def check(url, host_id):
         raise ValueError('Hostboard HTTP health is unavailable')
     if os.environ.get('HOSTBOARD_WATCH_REQUIRE_MONITOR', '1') != '0' and fetch(url.rstrip('/') + '/api/monitor-health').get('status') != 'ok':
         raise ValueError('Hostboard service monitor is unavailable')
+    independent = os.environ.get('HOSTBOARD_WATCH_AGENTS')
+    if independent:
+        check_agents(json.loads(independent))
+        return 'Hostboard HTTP, check scheduler and independent Netdata metrics are available'
+    # Backward-compatible trusted-origin mode; local auth requires direct Agent supervision.
     fleet = fetch(url.rstrip('/') + '/api/fleet', 15)
     generated = datetime.datetime.fromisoformat(fleet['generatedAt'].replace('Z', '+00:00')).timestamp()
     if not -60 <= time.time() - generated <= 30:

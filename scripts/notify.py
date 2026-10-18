@@ -31,6 +31,7 @@ class Queue:
             self.db.execute('ALTER TABLE events ADD COLUMN incident INTEGER')
         if 'cooldown' not in [r['name'] for r in self.db.execute('PRAGMA table_info(events)')]:
             self.db.execute('ALTER TABLE events ADD COLUMN cooldown INTEGER DEFAULT 900')
+        self.db.executescript("CREATE INDEX IF NOT EXISTS event_predecessor ON events(key,id) WHERE state IN ('pending','failed'); CREATE INDEX IF NOT EXISTS event_due ON events(state,next);")
         with self.db:
             self.db.execute("INSERT OR IGNORE INTO metadata VALUES('mailNamespace',?)", (uuid.uuid4().hex,))
         self.namespace = self.db.execute("SELECT value FROM metadata WHERE key='mailNamespace'").fetchone()['value']
@@ -97,8 +98,12 @@ class Queue:
 
     def flush(self, now=None, limit=3, only=None):
         now = time.time() if now is None else now
-        rows = self.db.execute("SELECT * FROM events WHERE state IN ('pending','failed') AND next<=? AND (? IS NULL OR id=?) ORDER BY id LIMIT ?", (now, only, only, limit)).fetchall()
-        for row in rows:
+        attempted = set()
+        for _ in range(min(max(limit, 0), 100)):
+            rows = self.db.execute(f"SELECT e.* FROM events e WHERE e.state IN ('pending','failed') AND e.next<=? AND (? IS NULL OR e.id=?) AND NOT EXISTS (SELECT 1 FROM events p WHERE p.key=e.key AND p.id<e.id AND p.state IN ('pending','failed')) AND e.id NOT IN ({','.join('?' for _ in attempted) or '-1'}) ORDER BY e.next,e.id LIMIT 1", (now, only, only, *attempted)).fetchall()
+            if not rows: break
+            row = rows[0]
+            attempted.add(row['id'])
             if self.db.execute("SELECT 1 FROM events WHERE key=? AND id<? AND state IN ('pending','failed')", (row['key'], row['id'])).fetchone():
                 continue
             # A SQLite write lock serializes simultaneous Netdata custom senders.

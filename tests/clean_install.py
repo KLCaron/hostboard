@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import re
 import secrets
+import sqlite3
 import shlex
 import shutil
 import socket
@@ -25,6 +26,7 @@ DOCKER = shlex.split(os.environ.get('DOCKER', 'docker'))
 if DOCKER[0] == 'sudo':
     DOCKER.insert(1, '--preserve-env=COMPOSE_FILE,COMPOSE_PROJECT_NAME,HOSTBOARD_IMAGE')
 IMAGE = os.environ.get('HOSTBOARD_TEST_IMAGE', 'hostboard:ci')
+PREVIOUS_IMAGE = os.environ.get('HOSTBOARD_PREVIOUS_IMAGE','ghcr.io/klcaron/hostboard@sha256:583ca4c6c63f72fe3e8a3ce5311dfedb22559555c97ff94ca388f54827070424')
 
 
 def free_port():
@@ -113,7 +115,9 @@ def main():
                     time.sleep(1)
             initial = f'localhost:{registry_port}/hostboard:initial'
             upgraded = f'localhost:{registry_port}/hostboard:upgrade'
-            docker('tag', IMAGE, initial)
+            if docker('image','inspect','--format','{{.Id}}',PREVIOUS_IMAGE,capture=True,check=False).returncode != 0:
+                docker('pull',PREVIOUS_IMAGE)
+            docker('tag', PREVIOUS_IMAGE, initial)
             docker('tag', IMAGE, upgraded)
             docker('push', initial)
             docker('push', upgraded)
@@ -160,9 +164,53 @@ def main():
             assert persisted['settings']['general']['temperature']=='F' and persisted['checks'][0]['id']==check_id
             run('bash','scripts/manage.sh','backup','./backups/manual')
             assert (root/'backups/manual/monitor.sqlite').stat().st_mode & 0o077 == 0
+            # HB-007: genuine alternate private AND external data bind mounts.
+            # Deliberately retain a different stale ./private to catch the original bug.
+            compose('stop','hostboard')
+            external_private=Path(directory)/'external-private'
+            external_data=Path(directory)/'external-data'
+            shutil.copytree(root/'private',external_private)
+            shutil.copytree(root/'data',external_data)
+            (external_private/'installation-marker').write_text('active')
+            (root/'private/installation-marker').write_text('stale')
+            text=envfile.read_text().replace('HOSTBOARD_PRIVATE_DIR=./private',f'HOSTBOARD_PRIVATE_DIR={external_private}').replace('HOSTBOARD_DATA_DIR=./data',f'HOSTBOARD_DATA_DIR={external_data}')
+            envfile.write_text(text)
+            compose('up','-d','--wait','--wait-timeout','90','hostboard');login()
+            run('bash','scripts/manage.sh','backup','./backups/external')
+            checkpoint=root/'backups/external'
+            assert (checkpoint/'private/installation-marker').read_text()=='active'
+            assert (checkpoint/'private/admin.json').read_bytes()==before
+            assert all(p.stat().st_mode & 0o077 == 0 for p in (checkpoint/'private').rglob('*') if p.is_file())
+            with sqlite3.connect(checkpoint/'monitor.sqlite') as db:
+                assert db.execute('pragma integrity_check').fetchone()[0]=='ok'
+                assert db.execute('select count(*) from service_config').fetchone()[0]==1
+            # Missing/unreadable configuration refuses a backup without stopping the app.
+            admin=external_private/'admin.json';admin.rename(external_private/'saved-admin')
+            assert run('bash','scripts/manage.sh','backup','./backups/missing',check=False).returncode!=0
+            (external_private/'saved-admin').rename(admin);admin.chmod(0)
+            assert run('bash','scripts/manage.sh','backup','./backups/unreadable',check=False).returncode!=0
+            admin.chmod(0o600)
+            (external_private/'installation-marker').write_text('changed')
+            run('bash','scripts/manage.sh','rollback','./backups/external');login()
+            assert (external_private/'installation-marker').read_text()=='active'
+            assert (root/'private/installation-marker').read_text()=='stale'
+            assert api('/api/admin/config')[1]['checks'][0]['id']==check_id
+            container_id=compose('ps','-q','hostboard',capture=True).stdout.strip()
+            corrupt=root/'backups/corrupt';shutil.copytree(checkpoint,corrupt)
+            (corrupt/'monitor.sqlite').write_bytes(b'corrupt checkpoint')
+            assert run('bash','scripts/manage.sh','rollback','./backups/corrupt',check=False).returncode!=0
+            assert compose('ps','-q','hostboard',capture=True).stdout.strip()==container_id
+            print('PASS HB-007: actual alternate-private/external-data Docker mounts, stale local configuration excluded, missing/unreadable rejection, paired restore, restrictive permissions, corrupt restore rejection.',flush=True)
             run('bash','scripts/manage.sh','upgrade',upgraded,'./backups/before-upgrade')
             login()
             assert api('/api/admin/config')[1]['checks'][0]['id']==check_id
+            with sqlite3.connect(root/'backups/before-upgrade/monitor.sqlite') as db:
+                assert db.execute('pragma user_version').fetchone()[0]==1
+                old_samples=db.execute('select count(*) from samples').fetchone()[0]
+            with sqlite3.connect(external_data/'monitor.sqlite') as db:
+                assert db.execute('pragma user_version').fetchone()[0]==2
+                assert db.execute('select count(*) from samples where generation=1').fetchone()[0]>=old_samples
+            print('PASS: real preserved v0.5.1 image/schema1 to corrected image/schema2 migration with retained observations.',flush=True)
             # Create a real outage/incident, observe unavailable Agent, then restore.
             compose('stop','fixture')
             for _ in range(25):
@@ -179,7 +227,11 @@ def main():
             login()
             restored=api('/api/admin/config')[1]
             assert restored['checks'][0]['id']==check_id and restored['settings']['general']['temperature']=='F'
-            assert initial in (root/'.env').read_text()
+            saved_image=(root/'backups/before-upgrade/image.txt').read_text().split()[1]
+            assert saved_image in (root/'.env').read_text()
+            assert docker('inspect','--format','{{.Image}}',compose('ps','-q','hostboard',capture=True).stdout.strip(),capture=True).stdout.strip()==saved_image
+            with sqlite3.connect(external_data/'monitor.sqlite') as db:
+                assert db.execute('pragma user_version').fetchone()[0]==1
             compose('start','fixture')
             print('PASS: clean clone, image installation, database initialization, Agent connection, authorization/CSRF, check creation, recreation, image pull/upgrade, private backup, incident recovery, paired rollback, and unavailable-Agent handling.', flush=True)
         finally:

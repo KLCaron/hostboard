@@ -109,6 +109,38 @@ class WatchdogTests(unittest.TestCase):
             self.assertNotEqual(queue.namespace, namespace)
             queue.db.close()
 
+    def test_hb001_fair_retry_with_backlog_and_restart(self):
+        with tempfile.TemporaryDirectory() as d:
+            config = Path(d)/'smtp.json'; config.write_text('{}')
+            database = str(Path(d)/'queue.sqlite')
+            sent=[]
+            def sender(row):
+                if row['key']=='bad': raise ValueError('private SMTP response')
+                sent.append(dict(row))
+            queue=Queue(database,str(config),sender)
+            for i in range(4):
+                queue.transition('bad','Bad',True,'failure',1000+i*20,cooldown=0)
+                queue.transition('bad','Bad',False,'recovery',1010+i*20,cooldown=0)
+            for i in range(7): queue.transition(str(i),'Good',True,'failure',1080,cooldown=0)
+            for i in range(8): queue.flush(1080+i,limit=1)
+            self.assertEqual(len(sent),7)
+            self.assertEqual(queue.db.execute('SELECT attempts FROM events WHERE id=1').fetchone()[0],1)
+            queue.db.close()
+            queue=Queue(database,str(config),sender)
+            queue.flush(1090,limit=1)
+            self.assertEqual(queue.db.execute('SELECT attempts FROM events WHERE id=1').fetchone()[0],1)
+            queue.flush(1110,limit=1)
+            self.assertEqual(queue.db.execute('SELECT attempts FROM events WHERE id=1').fetchone()[0],2)
+            self.assertNotIn('private SMTP response',str(queue.history('bad')))
+            for i in range(7): queue.transition(str(i),'Good',False,'recovery',1111,cooldown=0)
+            for i in range(7): queue.flush(1111+i,limit=1)
+            self.assertEqual(len(sent),14)
+            for i in range(7):
+                events=[r for r in sent if r['key']==str(i)]
+                self.assertEqual([e['event'] for e in events],['outage','recovery'])
+                self.assertEqual(events[0]['incident'],events[1]['incident'])
+            queue.db.close()
+
     def test_native_netdata_critical_recovery_deduplication(self):
         with tempfile.TemporaryDirectory() as d:
             queue = Queue(str(Path(d) / 'queue.sqlite'), str(Path(d) / 'missing'))
