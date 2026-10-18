@@ -4,6 +4,8 @@ import http from 'node:http';
 import { activeAlert, resolvedAlert, sensorGroup, validateWindow } from '../server/investigation.js';
 import { Agent } from '../server/netdata.js';
 import { containerStatus, sortContainers } from '../src/preferences.js';
+import { servicesFromHosts } from '../src/services.js';
+import type { Host } from '../src/types.js';
 import type { Container } from '../src/types.js';
 
 test('time windows reject unbounded, future, reversed, missing and malformed requests',()=>{
@@ -63,4 +65,14 @@ test('metric queries use bounded per-dimension extrema, invert idle peaks, cache
   fail=true;const bad=await new Agent(agent.config).metricHistory('system.cpu',w);assert.equal(bad.points.length,0);assert.equal(bad.errors.length,3);
   fail=false;wrong=true;const isolated=await new Agent(agent.config).metricHistory('system.cpu',w);assert.equal(isolated.points.length,0);assert.equal(isolated.errors.length,3);
   await assert.rejects(()=>agent.metricHistory('not-a-chart',w),/Unknown metric/);
+});
+
+test('service availability remains independent of running and Docker health',()=>{
+  const host = {id:'h',status:'online',containers:[{name:'web',state:'running',health:'healthy'}]} as Host;
+  const service = servicesFromHosts([host])[0];
+  assert.equal(service.state,'running');assert.equal(service.dockerHealth,'healthy');assert.equal(service.availability.state,'unchecked');
+  const independentlyDown = servicesFromHosts([host],{'h:web':{state:'down',method:'http',checkedAt:'2026-01-01T00:00:00Z',detail:'HTTP 503'}})[0];
+  assert.equal(independentlyDown.state,'running');assert.equal(independentlyDown.availability.state,'down');
+  const disconnected = servicesFromHosts([{...host,status:'offline'}])[0];
+  assert.equal(disconnected.state,'unknown');assert.equal(disconnected.dockerHealth,null);
 });

@@ -1,0 +1,117 @@
+import { test, expect } from '@playwright/test';
+
+test('real fleet, deep links, historical controls, diagnostics and container investigation',async({page},info)=>{
+  const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
+  await page.goto('/');
+  await expect(page.getByRole('heading',{name:'Fleet overview'})).toBeVisible();
+  const host=page.locator('.host-card').first();
+  await expect(host.getByText('Online',{exact:true})).toBeVisible();
+  await expect(page.locator('.services-panel')).toHaveJSProperty('open',false);
+  await host.getByRole('button',{name:'Explore host'}).click();
+  await expect(host.getByText('Available retention:',{exact:false})).toBeVisible();
+  const explorer=host.getByRole('region',{name:'Metric investigation'});
+  await explorer.getByRole('button',{name:'24h',exact:true}).click();
+  await expect(explorer.getByRole('button',{name:'24h',exact:true})).toHaveAttribute('aria-pressed','true');
+  await expect(explorer.getByText('Available retention:',{exact:false})).toBeVisible();
+  await explorer.getByRole('button',{name:'Pause',exact:true}).click();
+  await expect(explorer.getByRole('button',{name:'Resume live'})).toBeVisible();
+  await explorer.getByRole('button',{name:'Zoom in',exact:true}).click();
+  await explorer.getByRole('button',{name:'Pan earlier'}).click();
+  await explorer.getByText('Custom time window',{exact:true}).click();
+  const now=new Date();const local=(d:Date)=>new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,16);
+  await explorer.getByLabel('From',{exact:true}).fill(local(new Date(now.getTime()-7200000)));
+  await explorer.getByLabel('To',{exact:true}).fill(local(new Date(now.getTime()-3600000)));
+  await explorer.getByRole('button',{name:'Apply window'}).click();
+  await expect(explorer.getByText('Available retention:',{exact:false})).toBeVisible();
+  await host.getByRole('tab',{name:'Diagnostics',exact:true}).click();
+  await expect(host.getByText('CPU diagnostics',{exact:true})).toBeVisible();
+  await host.locator('.diagnostic-grid button').first().click();
+  await expect(host.getByText('Available retention:',{exact:false})).toBeVisible();
+  await host.getByRole('tab',{name:/Containers/}).click();
+  await host.getByLabel('Sort containers').selectOption('cpu');
+  await host.locator('tbody tr').first().getByRole('button',{name:'History & I/O →'}).click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await expect(page.getByRole('dialog').getByText('Available retention:',{exact:false})).toBeVisible();
+  await page.getByRole('dialog').getByLabel('Investigation metric').selectOption({index:1});
+  await expect(page.getByRole('dialog').getByText('Available retention:',{exact:false})).toBeVisible();
+  await page.keyboard.press('Escape');await expect(page.getByRole('dialog')).not.toBeVisible();
+  await host.getByRole('tab',{name:'Temperatures'}).click();
+  await expect(host.getByRole('heading',{name:'CPU temperatures'})).toBeVisible();
+  await expect(host.getByRole('heading',{name:'Storage temperatures'})).toBeVisible();
+  const href=await host.getByRole('link',{name:/Direct link/}).getAttribute('href');
+  await page.goto('/'+href);await page.reload();
+  await expect(page.locator('.host-card.expanded')).toHaveCount(1);
+  await expect(page.locator('.host-card.expanded').getByText('Available retention:',{exact:false})).toBeVisible();
+  await expect(page.locator('.host-card.expanded').getByRole('button',{name:'24h',exact:true})).toHaveAttribute('aria-pressed','true');
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+  await page.screenshot({path:`.ai-local/${info.project.name}-host.png`,fullPage:true});
+  expect(errors).toEqual([]);
+});
+
+test('real alert details, resolved incidents and compact service semantics',async({page,request},info)=>{
+  const fleet=await (await request.get('/api/fleet')).json();
+  const current=await (await request.get(`/api/hosts/${fleet.hosts[0].id}/alerts`)).json();
+  await page.goto('/');
+  await page.getByRole('button',{name:/^Alerts/}).click();
+  await expect(page.getByRole('heading',{name:'Alert investigation'})).toBeVisible();
+  const dialog=page.getByRole('dialog');
+  if(current.active.length) {
+    await page.locator('.host-alerts').first().getByRole('button').filter({hasText:current.active[0].summary}).first().click();
+    await expect(dialog.getByText('Warning rule:',{exact:false})).toBeVisible();
+    if(current.active[0].warning) await expect(dialog.getByText('Warning rule:',{exact:false})).toContainText(current.active[0].warning);
+    await expect(dialog.getByText(/Available retention:|no longer collected/)).toBeVisible();
+    await page.getByRole('button',{name:'Close investigation'}).click();
+  } else await expect(page.locator('.host-alerts').first().getByText('No active warnings or critical alerts.')).toBeVisible();
+  await page.locator('.host-alerts').first().getByText(/Recently resolved/).click();
+  if(current.resolved.length) {
+    const resolved=page.locator('.host-alerts').first().getByRole('button',{name:/Resolved/}).first();
+    await expect(resolved).toBeVisible();await resolved.click();
+    await expect(dialog.getByText('before clearing',{exact:false})).toBeVisible();
+    await expect(dialog.getByText(/Available retention:|no longer collected/)).toBeVisible();
+    await page.keyboard.press('Escape');
+  } else await expect(page.locator('.host-alerts').first().getByText(/No resolved incidents/)).toBeVisible();
+  await page.getByRole('button',{name:'Overview',exact:true}).click();
+  await page.locator('.services-panel>summary').click();
+  await page.locator('.service-list>details>summary').first().click();
+  await expect(page.locator('.service-list').getByText(/Application availability: not independently checked/).first()).toBeVisible();
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+  await page.screenshot({path:`.ai-local/${info.project.name}-alerts-services.png`,fullPage:true});
+});
+
+test('API validation and visible connection failures without invented readings',async({page,request})=>{
+  const fleet=await (await request.get('/api/fleet')).json();
+  const id=fleet.hosts[0].id;
+  expect((await request.get('/api/hosts/unknown/alerts')).status()).toBe(404);
+  expect((await request.get(`/api/hosts/${id}/metric-history?chart=system.cpu&after=x&before=2`)).status()).toBe(400);
+  const now=Math.floor(Date.now()/1000);
+  expect((await request.get(`/api/hosts/${id}/metric-history?chart=nonexistent&after=${now-3600}&before=${now}`)).status()).toBe(404);
+  // Fault injection aborts requests; all successful metrics still come from real Agents.
+  await page.route('**/api/fleet',route=>route.abort());
+  await page.goto('/');
+  await expect(page.getByRole('alert')).toContainText('Cannot refresh dashboard');
+  await page.unroute('**/api/fleet');
+  await page.getByRole('button',{name:'Refresh',exact:true}).click();
+  await expect(page.locator('.host-card').first().getByText('Online',{exact:true})).toBeVisible();
+  await page.route('**/metric-history?**',route=>route.abort());
+  await page.locator('.host-card').first().getByRole('button',{name:'Explore host'}).click();
+  await expect(page.locator('.host-card').first().getByRole('alert')).toBeVisible();
+  await expect(page.locator('.host-card').first().getByRole('button',{name:'Retry'})).toBeVisible();
+});
+
+test('pause freezes historical requests while resume restores a moving window',async({page,request})=>{
+  const fleet=await (await request.get('/api/fleet')).json();
+  await page.goto(`/#host=${fleet.hosts[0].id}`);
+  const explorer=page.locator('.host-card.expanded').getByRole('region',{name:'Metric investigation'});
+  await expect(explorer.getByText('Available retention:',{exact:false})).toBeVisible();
+  await explorer.getByRole('button',{name:'Pause',exact:true}).click();
+  await expect(explorer.getByText('Available retention:',{exact:false})).toBeVisible();
+  await page.clock.install();
+  const requests:string[]=[];
+  page.on('request',r=>{if(r.url().includes('/metric-history?'))requests.push(r.url());});
+  await page.clock.fastForward(35000);
+  expect(requests).toEqual([]);
+  const resumedRequest=page.waitForRequest(r=>r.url().includes('/metric-history?'));
+  await explorer.getByRole('button',{name:'Resume live'}).click();
+  await resumedRequest;
+  await expect(explorer.getByRole('button',{name:'Pause',exact:true})).toBeVisible();
+});

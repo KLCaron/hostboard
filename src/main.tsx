@@ -1,3 +1,6 @@
+import { Alerts, Containers, HostDiagnostics, HostExplorer, Services, InvestigationDialog, type InvestigationTarget } from './Investigation';
+import { readPreference, savePreference } from './preferences';
+import type { AlertHistory } from './investigation-types';
 import React, { useEffect, useId, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
@@ -24,12 +27,8 @@ import {
 import {
   Area,
   AreaChart,
-  CartesianGrid,
-  Line,
-  LineChart,
   ResponsiveContainer,
   Tooltip,
-  XAxis,
   YAxis,
 } from 'recharts';
 import type { Fleet, History, Host, Point, Range } from './types';
@@ -147,83 +146,6 @@ function ChartTip({
     </div>
   );
 }
-function HistoryChart({
-  history,
-  kind,
-}: {
-  history: History | undefined;
-  kind: 'cpu' | 'memory' | 'network' | 'io' | 'load';
-}) {
-  const series =
-    kind === 'network'
-      ? [
-          ['received', 'Received', '#a7dbe7'],
-          ['sent', 'Sent', '#a7b3fa'],
-        ]
-      : kind === 'io'
-        ? [
-            ['read', 'Read', '#dfbe8b'],
-            ['write', 'Write', '#b1d995'],
-          ]
-        : [
-            [
-              kind,
-              kind === 'cpu'
-                ? 'CPU utilization'
-                : kind === 'memory'
-                  ? 'RAM utilization'
-                  : '1 minute load',
-              kind === 'cpu' ? '#b9e692' : '#b0b9f6',
-            ],
-          ];
-  const unit = ['cpu', 'memory'].includes(kind) ? '%' : kind === 'load' ? '' : kind;
-  return (
-    <div className="history-chart">
-      {history?.points.some((p) => series.some(([key]) => p[key as keyof Point] !== null)) ? (
-        <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={history.points} margin={{ top: 12, right: 8, left: 0, bottom: 0 }}>
-            <CartesianGrid vertical={false} stroke="#262a31" strokeDasharray="3 5" />
-            <XAxis
-              dataKey="time"
-              type="number"
-              domain={['dataMin', 'dataMax']}
-              tickFormatter={time}
-              minTickGap={45}
-              tick={{ fill: '#7f8592', fontSize: 11 }}
-              axisLine={false}
-              tickLine={false}
-            />
-            <YAxis
-              width={kind === 'network' || kind === 'io' ? 78 : 40}
-              domain={['cpu', 'memory'].includes(kind) ? [0, 100] : [0, 'auto']}
-              tickFormatter={(v) =>
-                unit === 'network' ? rate(v) : unit === 'io' ? rate(v, true) : `${num(v, 0)}${unit}`
-              }
-              tick={{ fill: '#7f8592', fontSize: 11 }}
-              axisLine={false}
-              tickLine={false}
-            />
-            <Tooltip content={<ChartTip unit={unit} />} />
-            {series.map(([key, name, color]) => (
-              <Line
-                key={key}
-                name={name}
-                dataKey={key}
-                stroke={color}
-                strokeWidth={2}
-                dot={false}
-                connectNulls={false}
-                isAnimationActive={false}
-              />
-            ))}
-          </LineChart>
-        </ResponsiveContainer>
-      ) : (
-        <div className="empty-chart">No recorded samples in this range.</div>
-      )}
-    </div>
-  );
-}
 function Meter({ value, color = '#bbdf93' }: { value: number | null; color?: string }) {
   return (
     <div className="meter">
@@ -242,22 +164,23 @@ function HostCard({
   range,
   expanded,
   onExpand,
+  onInvestigate,
 }: {
   host: Host;
   history?: History;
   range: Range;
   expanded: boolean;
   onExpand: () => void;
+  onInvestigate: (target: InvestigationTarget) => void;
 }) {
-  const [metric, setMetric] = useState<'cpu' | 'memory' | 'network' | 'io' | 'load'>('cpu');
-  const [tab, setTab] = useState<'performance' | 'containers' | 'sensors'>('performance');
+  const [tab, setTab] = useState<'performance' | 'diagnostics' | 'containers' | 'sensors'>('performance');
   const live = host.status === 'online',
     points = history?.points || [],
     running = host.containers.filter((c) => c.state === 'running').length;
   const alerts = host.alerts?.reduce((n, a) => n + a.count, 0),
     warmest = host.sensors.find((s) => s.value !== null);
   return (
-    <article className={`host-card ${expanded ? 'expanded' : ''} ${!live ? 'not-live' : ''}`}>
+    <article id={`host-${host.id}`} className={`host-card ${expanded ? 'expanded' : ''} ${!live ? 'not-live' : ''}`}>
       <div className="host-heading">
         <button className="host-title" onClick={onExpand} aria-expanded={expanded}>
           <span className="server-icon">
@@ -306,7 +229,8 @@ function HostCard({
             {percent(live ? host.cpu : null)}
             <span>{live && host.load ? `${num(host.load[0], 2)} load` : '— load'}</span>
           </div>
-          <Spark points={points} metric="cpu" color="#bce894" />
+          <Spark points={points.map(p=>({...p,cpu:history?.cpuPeaks?.some(s=>s.value!=null)?history.cpuPeaks.find(s=>s.time===p.time)?.value??null:p.cpu}))} metric="cpu" color="#bce894" />
+          <span className="muted small">{history?.cpuPeaks?.some(p=>p.value!=null)?`Peak ${percent(Math.max(...history.cpuPeaks.flatMap(p=>p.value==null?[]:[p.value])))}`:'CPU peak unavailable'}</span>
         </div>
         <div className="metric-block">
           <div className="label">
@@ -398,7 +322,7 @@ function HostCard({
       {expanded && (
         <div className="host-details">
           <div className="detail-tabs" role="tablist" aria-label={`${host.name} details`}>
-            {(['performance', 'containers', 'sensors'] as const).map((t) => (
+            {(['performance', 'diagnostics', 'containers', 'sensors'] as const).map((t) => (
               <button
                 role="tab"
                 aria-selected={tab === t}
@@ -410,33 +334,13 @@ function HostCard({
                   ? 'Performance'
                   : t === 'containers'
                     ? `Containers (${host.containers.length})`
-                    : 'Temperatures'}
+                    : t === 'diagnostics' ? 'Diagnostics' : 'Temperatures'}
               </button>
             ))}
           </div>
           {tab === 'performance' && (
             <>
-              <div className="chart-heading">
-                <div>
-                  <h3>Host performance</h3>
-                  <p>{rangeLabels[range]} history · averaged samples · gaps mean no data</p>
-                </div>
-                <select
-                  aria-label="Historical metric"
-                  value={metric}
-                  onChange={(e) => setMetric(e.target.value as typeof metric)}
-                >
-                  <option value="cpu">CPU utilization</option>
-                  <option value="memory">Memory utilization</option>
-                  <option value="load">CPU load</option>
-                  <option value="network">Network throughput</option>
-                  <option value="io">Disk I/O</option>
-                </select>
-              </div>
-              <HistoryChart history={history} kind={metric} />
-              {history?.errors.length ? (
-                <p className="warning-text small">{history.errors.join(' · ')}</p>
-              ) : null}
+              <HostExplorer host={host} range={range} />
               <div className="detail-facts">
                 <span>
                   Agent <b>{host.version || '—'}</b>
@@ -450,71 +354,13 @@ function HostCard({
               </div>
             </>
           )}
-          {tab === 'containers' && (
-            <>
-              <p className="detail-description">
-                Agent-reported state and resources. CPU: 100% equals one core. Memory: resident
-                usage.
-              </p>
-              {host.dockerAvailable ? (
-                <div className="table-scroll">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Container</th>
-                        <th>State / health</th>
-                        <th>CPU</th>
-                        <th>Memory</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {host.containers.map((c) => (
-                        <tr key={c.name}>
-                          <td>
-                            <b>{c.name}</b>
-                            <span title={c.image}>{c.image}</span>
-                          </td>
-                          <td>
-                            <span
-                              className={`container-state ${c.state === 'running' ? 'good' : ''}`}
-                            >
-                              {live ? c.state : 'Unavailable'}
-                            </span>
-                            {c.health && c.health !== 'no_healthcheck' && (
-                              <small
-                                className={c.health.includes('unhealthy') ? 'warning-text' : ''}
-                              >
-                                {live ? c.health.replaceAll('_', ' ') : ''}
-                              </small>
-                            )}
-                          </td>
-                          <td>{percent(live ? c.cpu : null)}</td>
-                          <td>{size(live ? c.memory : null)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <p className="empty-chart">Docker metrics are not available from this Agent.</p>
-              )}
-            </>
-          )}
-          {tab === 'sensors' && (
-            <div className="sensor-grid">
-              {host.sensors.length ? (
-                host.sensors.map((s) => (
-                  <div key={s.name}>
-                    <Thermometer size={17} />
-                    <span>{s.name}</span>
-                    <b>{live && s.value !== null ? `${num(s.value)} °C` : '—'}</b>
-                  </div>
-                ))
-              ) : (
-                <p className="muted">No temperature sensors reported by this Agent.</p>
-              )}
-            </div>
-          )}
+          {tab === 'diagnostics' && <HostDiagnostics host={host} range={range} />}
+          {tab === 'containers' && <Containers host={host} onInvestigate={onInvestigate} />}
+          {tab === 'sensors' && <>{['CPU temperatures','Storage temperatures','Other temperatures'].map(group => <section key={group}><h3 className="sensor-heading">{group}</h3><div className="sensor-grid">
+            {host.sensors.filter(s=>s.group===group).map(s=><button className="sensor-reading" key={s.id} onClick={()=>onInvestigate({host,chart:s.id})}><span>{s.name}</span><b>{live?`${num(s.value)} °C`:'—'}</b></button>)}
+            {!host.sensors.some(s=>s.group===group)&&<p className="muted small">No sensors reported.</p>}
+          </div></section>)}</>}
+          <a className="text-link host-permalink" href={`#host=${host.id}`}>Direct link to {host.name} ↗</a>
           {host.warnings.length > 0 && (
             <div className="notice">Some metrics are unavailable: {host.warnings.join(' · ')}</div>
           )}
@@ -530,7 +376,7 @@ function HostCard({
 function App() {
   const [fleet, setFleet] = useState<Fleet>(),
     [histories, setHistories] = useState<Record<string, History>>({}),
-    [range, setRange] = useState<Range>('1h'),
+    [range, setRange] = useState<Range>(() => readPreference('range','1h',v=>ranges.includes(v as Range))),
     [page, setPage] = useState<'overview' | 'servers' | 'alerts'>('overview'),
     [expanded, setExpanded] = useState<string | null>(null),
     [error, setError] = useState<string | null>(null),
@@ -540,6 +386,12 @@ function App() {
     [now, setNow] = useState(Date.now()),
     [help, setHelp] = useState(false),
     [query, setQuery] = useState('');
+  const [target,setTarget] = useState<InvestigationTarget | null>(null);
+  useEffect(()=>{ savePreference('range',range); },[range]);
+  useEffect(()=>{
+    const link=()=>{const match=location.hash.match(/^#host=([a-zA-Z0-9_-]+)$/);if(match){setPage('servers');setExpanded(match[1]);setQuery('');}};
+    link();window.addEventListener('hashchange',link);return()=>window.removeEventListener('hashchange',link);
+  },[]);
   useEffect(() => {
     let cancelled = false,
       controller: AbortController | undefined;
@@ -637,7 +489,7 @@ function App() {
     ),
     online = hosts.filter((h) => h.status === 'online');
   const alerts = hosts.flatMap((h) =>
-      (h.alerts || []).map((a) => ({ ...a, host: h.name, fresh: h.status === 'online' })),
+      (h.alerts || []).map((a) => ({ ...a, hostId:h.id, host: h.name, fresh: h.status === 'online' })),
     ),
     alertCount = alerts.reduce((n, a) => n + a.count, 0);
   const cpuHosts = online.filter((h) => h.cpu !== null && h.cores !== null),
@@ -730,6 +582,7 @@ function App() {
               onClick={() => setRefresh((v) => v + 1)}
               disabled={fetching}
               title="Refresh all metrics"
+              aria-label="Refresh"
             >
               <RefreshCw size={15} className={fetching ? 'spinning' : ''} />
               <span>Refresh</span>
@@ -820,7 +673,7 @@ function App() {
                   <h2>
                     Servers <span>{hosts.length || '—'}</span>
                   </h2>
-                  <p>Current metrics · {rangeLabels[range]} history</p>
+                  <p>Current metrics · {rangeLabels[range]} history · CPU sparkline shows peaks</p>
                 </div>
                 <div className="range-picker" role="group" aria-label="Historical time range">
                   {ranges.map((r) => (
@@ -854,7 +707,8 @@ function App() {
                         history={histories[host.id]}
                         range={range}
                         expanded={expanded === host.id}
-                        onExpand={() => setExpanded(expanded === host.id ? null : host.id)}
+                        onExpand={() => { const next=expanded===host.id?null:host.id;setExpanded(next); if(next) history.replaceState(null,'',`#host=${host.id}`);else history.replaceState(null,'',location.pathname); }}
+                        onInvestigate={setTarget}
                       />
                     ))
                   : [0, 1].map((i) => (
@@ -870,8 +724,10 @@ function App() {
               )}
             </>
           )}
-          {page !== 'servers' && (
-            <section className={`alerts-panel ${page === 'alerts' ? 'full-alerts' : ''}`}>
+          {page === 'alerts' && <Alerts hosts={hosts} onInvestigate={setTarget} />}
+          {page === 'overview' && <Services hosts={hosts} onInvestigate={setTarget} />}
+          {page === 'overview' && (
+            <section className="alerts-panel">
               <div className="alerts-heading">
                 <span className="alerts-icon">
                   <Bell size={19} />
@@ -890,7 +746,10 @@ function App() {
                 )}
               </div>
               {alerts.map((a) => (
-                <div className="alert-row" key={`${a.host}-${a.name}`}>
+                <button className="alert-row investigation-alert" key={`${a.host}-${a.name}`} onClick={async()=>{
+                  const host=hosts.find(h=>h.id===a.hostId)!;
+                  try {const details=await get<AlertHistory>(`/api/hosts/${host.id}/alerts`,new AbortController().signal);const alert=details.active.find(d=>d.name===a.name);if(alert)setTarget({host,alert,chart:alert.chart});else navigate('alerts');}catch{navigate('alerts');}
+                }}>
                   <span className={`severity ${a.severity}`}>{a.severity}</span>
                   <div>
                     <b>{a.summary}</b>
@@ -900,8 +759,8 @@ function App() {
                       {!a.fresh ? ' · last known state' : ''}
                     </span>
                   </div>
-                  <Bell size={15} />
-                </div>
+                  <ChevronRight size={15} />
+                </button>
               ))}
               {!alerts.length && (
                 <div className="all-clear">
@@ -938,6 +797,7 @@ function App() {
           </footer>
         </main>
       </div>
+      {target && <InvestigationDialog target={target} onClose={()=>setTarget(null)} />}
       {help && (
         <div className="modal-backdrop" onClick={() => setHelp(false)}>
           <section
@@ -960,8 +820,7 @@ function App() {
               Live metrics refresh every 10 seconds. Historical charts refresh every 30 seconds.
             </p>
             <p>
-              Charts show up to 180 averaged samples for the selected time range. Gaps indicate
-              missing data.
+              Overview sparklines show averages. Open a host or alert to investigate minimum, peak and average values with custom windows, zoom, pan and pause. Gaps indicate missing data.
             </p>
             <p>
               Offline and stale hosts are excluded from fleet totals. Container CPU usage is

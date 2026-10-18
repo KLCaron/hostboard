@@ -1,13 +1,14 @@
 {
   "name": "hostboard",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "concurrently -k \"tsx watch server/index.ts\" \"vite --host 127.0.0.1\"",
     "build": "tsc --noEmit && vite build && tsc -p tsconfig.server.json",
     "start": "node dist/server/server/index.js",
-    "test": "tsx --test tests/*.test.ts"
+    "test": "tsx --test tests/*.test.ts",
+    "test:browser": "playwright test"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.0",
@@ -20,6 +21,7 @@
     "zod": "^4.0.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.1",
     "@types/express": "^5.0.0",
     "@types/node": "^24.0.0",
     "@types/react": "^19.0.0",
