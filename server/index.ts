@@ -42,7 +42,7 @@ app.use((_req, res, next) => {
   });
   next();
 });
-app.get("/api/health", (_req, res) => res.json({ status: "ok" }));
+app.get("/api/health", (_req, res) => res.status(monitor.healthy() ? 200 : 503).json({status: monitor.healthy() ? "ok" : "unavailable"}));
 app.get("/api/monitor-health", (_req, res) =>
   res
     .status(monitor.healthy() ? 200 : 503)

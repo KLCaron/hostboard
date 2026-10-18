@@ -1,5 +1,5 @@
 {
-  "host": "smtp.gmail.com",
+  "host": "smtp.example.com",
   "port": 587,
   "username": "alerts@example.com",
   "password": "REPLACE_WITH_APP_PASSWORD",

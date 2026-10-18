@@ -22,6 +22,8 @@ import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCKER = shlex.split(os.environ.get('DOCKER', 'docker'))
+if DOCKER[0] == 'sudo':
+    DOCKER.insert(1, '--preserve-env=COMPOSE_FILE,COMPOSE_PROJECT_NAME,HOSTBOARD_IMAGE')
 IMAGE = os.environ.get('HOSTBOARD_TEST_IMAGE', 'hostboard:ci')
 
 

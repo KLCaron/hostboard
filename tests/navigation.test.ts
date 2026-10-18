@@ -7,7 +7,7 @@ import type { IncidentView, MonitorView } from '../src/monitor-types.js';
 
 test('all sections and bookmarked legacy routes resolve to the intended destination',()=>{
   for(const page of pages){assert.equal(resolveNavigation('#'+page).page,page);assert.equal(resolveNavigation('', '/'+page).page,page);}
-  assert.deepEqual(resolveNavigation('#host=kserver0'),{page:'servers',host:'kserver0'});
+  assert.deepEqual(resolveNavigation('#host=server-a'),{page:'servers',host:'server-a'});
   assert.deepEqual(resolveNavigation('#service=foundry-core'),{page:'services',service:'foundry-core'});
   assert.deepEqual(resolveNavigation('#incident=123'),{page:'issues',incident:123});
   assert.equal(resolveNavigation('', '/alerts').canonical,'#issues?type=metric');
@@ -17,7 +17,7 @@ test('all sections and bookmarked legacy routes resolve to the intended destinat
 });
 test('service grouping accommodates applications and infrastructure with explicit overrides',()=>{
   for(const name of ['Jellyfin','Filebrowser','Foundry core','New web app'])assert.equal(serviceGroup({id:'app',name,type:'http'}),'Applications');
-  for(const name of ['Hostboard','Independent watchdog','kserver1 Netdata metrics','SSH listener'])assert.equal(serviceGroup({id:'infra',name,type:'http'}),'Infrastructure');
+  for(const name of ['Hostboard','Independent watchdog','server-b Netdata metrics','SSH listener'])assert.equal(serviceGroup({id:'infra',name,type:'http'}),'Infrastructure');
   assert.equal(serviceGroup({id:'tcp',name:'Connection',type:'tcp'}),'Infrastructure');
   assert.equal(serviceGroup({id:'app',name:'Custom',type:'http',group:'Infrastructure'}),'Infrastructure');
 });

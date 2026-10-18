@@ -29,11 +29,11 @@ export function localAuthentication(app: Express, config: LocalConfig) {
   const limit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: "draft-8", legacyHeaders: false, message: {error: "Too many sign-in attempts. Try again in 15 minutes."} });
   let verifying = false;
   app.post("/auth/login", limit, express.urlencoded({extended: false, limit: "4kb"}), async (req, res, next) => {
-    if (req.get("Origin") !== config.origin || !req.session.csrf || req.body.csrf !== req.session.csrf) {
+    if (req.get("Origin") !== config.origin || !req.session.csrf || req.body?.csrf !== req.session.csrf) {
       res.status(403).send("A same-origin sign-in request is required"); return;
     }
     if (verifying) { res.status(429).send("Sign-in busy. Try again shortly."); return; }
-    const {username, password} = req.body;
+    const {username, password} = req.body ?? {};
     if (typeof username !== "string" || typeof password !== "string" || password.length > 1024) { res.status(400).send("Invalid sign-in request"); return; }
     let valid = false;
     verifying = true;
@@ -49,7 +49,7 @@ export function localAuthentication(app: Express, config: LocalConfig) {
   });
   app.get("/auth/logout", (req, res) => res.type("html").send(page("Sign out", `<form method="post" action="/auth/logout"><input type="hidden" name="csrf" value="${csrf(req)}"><button>Sign out</button></form>`)));
   app.post("/auth/logout", express.urlencoded({extended: false, limit: "4kb"}), (req, res, next) => {
-    if (req.get("Origin") !== config.origin || !req.session.csrf || req.body.csrf !== req.session.csrf) { res.sendStatus(403); return; }
+    if (req.get("Origin") !== config.origin || !req.session.csrf || req.body?.csrf !== req.session.csrf) { res.sendStatus(403); return; }
     req.session.destroy(error => {
       if (error) return next(error);
       res.clearCookie(name, {path: "/", secure, httpOnly: true, sameSite: "strict"}).redirect(303, "/auth/login");

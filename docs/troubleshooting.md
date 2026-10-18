@@ -1,0 +1,15 @@
+# Troubleshooting
+
+- **Missing admin/configuration file:** run setup in a fresh deployment directory, or restore your private configuration. A missing admin file fails closed. Do not copy private configuration into the image.
+- **Container unhealthy / EACCES:** inspect `docker compose logs --tail 50 hostboard`. Data must be writable and config/private readable by the UID/GID in `.env`; parent directories need traversal permission. Do not solve this by running privileged or making credentials world-readable.
+- **Agent offline:** check URL/port from the container network, Agent listener/ACL/firewall, exact `/api/v3/nodes` selector, and any required bearer variable. A host-loopback Agent is not reachable using container loopback. See [networking](networking.md). DNS changes may require updating approved addresses and recreating Hostboard.
+- **Stale metrics:** collection/streaming must provide recent CPU samples. A reachable Agent serving an old node is stale, not healthy. Missing metrics are shown as gaps; Hostboard does not fabricate data.
+- **Charts empty:** confirm Netdata retention and permissions. Historical metrics live in Netdata; Hostboard cannot backfill unavailable periods. Some contexts/labels are collector/version-specific.
+- **Login returns to sign-in / no cookie:** match the exact configured origin. HTTPS through an HTTP proxy requires its actual source IP in `trustedProxies` and `X-Forwarded-Proto: https`. Trusting arbitrary proxies is unsafe. HTTP local mode requires the loopback browser URL, typically through SSH forwarding.
+- **Administrative write denied:** sign in with the explicit account/allowlisted Access identity. Origin, JSON content type, and request marker are required. Forward the signed Access assertion; a forged email header does not work. Cross-origin writes intentionally fail.
+- **Destination denied:** approve the exact hostname, port and all DNS addresses in private policy, then recreate. Metadata/link-local destinations stay blocked. Existing editable DB rows do not grant network permission.
+- **Email unavailable:** missing SMTP is optional. Check transport configuration/TLS and outbound port; use Settings' test once, then confirm inbox receipt. SMTP acceptance does not prove receipt. Transport secrets and detailed provider errors are not returned to browsers.
+- **429 response:** sign-in/API/manual-test limits are active. Wait for the returned interval; proxies may share a source bucket. Do not repeatedly retry credentials.
+- **Newer database schema:** restore the matching pre-upgrade image/database pair. Do not edit `PRAGMA user_version` to bypass protection.
+
+When reporting a problem, include the release version and sanitized error text. Database backups, raw private files, live URLs, tokens, SMTP credentials, and real email allowlists do not belong in public issues.

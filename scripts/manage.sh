@@ -13,7 +13,8 @@ backup() {
   [[ "$destination" != "$PWD/data" && "$destination" != "$PWD/private" && "$destination" != "$PWD/config" ]] || exit 1
   local stamp="$(date -u +%Y%m%dT%H%M%SZ)-$$"
   "${compose[@]}" exec -T hostboard node dist/server/server/maintenance.js backup "/app/data/backups/$stamp.sqlite"
-  "${compose[@]}" cp "hostboard:/app/data/backups/$stamp.sqlite" "$destination/monitor.sqlite"
+  "${compose[@]}" exec -T hostboard cat "/app/data/backups/$stamp.sqlite" > "$destination/monitor.sqlite"
+  "${compose[@]}" exec -T hostboard rm "/app/data/backups/$stamp.sqlite"
   chmod 600 "$destination/monitor.sqlite"
   cp -a .env config private "$destination/"
   "${compose[@]}" images --format json > "$destination/images.json"

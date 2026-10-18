@@ -20,7 +20,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /app/dist ./dist
-COPY LICENSE ./LICENSE
+COPY LICENSE THIRD_PARTY_NOTICES.txt ./
 RUN mkdir -p /app/data /app/private /app/config && chown node:node /app/data /app/private /app/config
 USER node
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 CMD node -e "fetch('http://127.0.0.1:'+process.env.PORT+'/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"

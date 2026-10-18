@@ -1,0 +1,11 @@
+# Dependencies and assets
+
+Hostboard is AGPL-3.0-only. The release's locked npm tree uses reviewed MIT, ISC, MIT-0, 0BSD, BSD-2/3-Clause, Apache-2.0, MPL-2.0, CC-BY-4.0, and combined MIT/ISC license expressions. `scripts/check-licenses.mjs` fails on unknown/missing expressions, including optional platform packages. This is a maintained compatibility check, not legal advice or a replacement for reviewing new dependencies.
+
+React, Express, Recharts, Tailwind, Zod, jose, argon2, express-session, memorystore, express-rate-limit and Inquirer retain upstream notices. Lucide icons use ISC. The favicon is project SVG artwork. No proprietary fonts, analytics, stock photos, or remote UI assets are required. Documentation screenshots render the real app with synthetic fixture readings.
+
+The CSS compiler's Lightning CSS packages use MPL-2.0; upstream files are unmodified, file-level source obligations remain in effect, and source is available from [Lightning CSS](https://github.com/parcel-bundler/lightningcss) and the exact npm package references in `package-lock.json`. `caniuse-lite` compatibility data is CC-BY-4.0; attribution and license are included in the [third-party notices](../THIRD_PARTY_NOTICES.txt). Apache/BSD/MIT/ISC notices are retained there as well. Runtime npm packages also contain their upstream licenses.
+
+The Node Alpine container base contains additional operating-system dependencies under their own licenses, including Node/OpenSSL and musl/BusyBox components. They are an unmodified container base, not relicensed by Hostboard. The published SBOM records the image inventory. Consult the [Node Docker image source](https://github.com/nodejs/docker-node) and [Alpine package sources](https://pkgs.alpinelinux.org/) for corresponding sources and package license metadata. No Netdata binary is bundled; connect a separately installed Agent.
+
+`npm audit` covers the locked JavaScript dependency tree; image/OS advisories and host patches also require operator attention. Keep exact image digests and source revisions for reproducibility. CI releases attach build provenance/SBOM and run verification before publishing versioned amd64/arm64 images. Source availability for modified network-served Hostboard remains the deploying operator's AGPL responsibility.
