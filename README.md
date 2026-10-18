@@ -1,6 +1,6 @@
 # Hostboard
 
-> Release status: the initial v0.5.0 image has a native local-login failure. The fix is on `main`; use the corrected release once published. Existing Cloudflare Access deployments are unaffected.
+> Use v0.5.1 or later. The initial v0.5.0 image has a local-login defect; v0.5.1 fixes it while retaining strict CSRF protection. Existing Cloudflare Access deployments are unaffected.
 
 A self-hosted dashboard for servers monitored by **Netdata Agents**. View live metrics, historical charts, Docker resources, Netdata alerts, service availability, and persistent incidents in one place.
 
@@ -22,7 +22,7 @@ Requires Linux, Git, Docker Engine with Compose v2, and at least one reachable N
 ```sh
 git clone https://github.com/KLCaron/hostboard.git
 cd hostboard
-git checkout v0.5.0
+git checkout v0.5.1
 ./scripts/setup.sh
 ./scripts/setup.sh --check
 docker compose up -d --wait
@@ -73,7 +73,7 @@ SMTP is optional. Configure `private/smtp.json` during setup or from the [SMTP e
 ```sh
 ./scripts/manage.sh backup ./backups/manual
 # After reviewing a newer release, substitute its exact version or digest:
-./scripts/manage.sh upgrade ghcr.io/klcaron/hostboard:0.5.0 ./backups/before-upgrade
+./scripts/manage.sh upgrade ghcr.io/klcaron/hostboard:0.5.1 ./backups/before-upgrade
 # Restore the paired image, configuration, and database if necessary:
 ./scripts/manage.sh rollback ./backups/before-upgrade
 ```

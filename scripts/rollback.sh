@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 # Run ON the deployment server. Optional argument is a release directory name.
 root=/srv/stacks/hostboard
 if [[ $# -gt 0 ]]; then
@@ -9,11 +10,11 @@ else
   release=$(cat "$root/previous-release")
 fi
 [[ -d "$release" && "$release" == "$root/releases/"* ]] || { echo 'Previous release not found' >&2; exit 1; }
-# Only schema v1 is verified with v0.4.1/v0.5.0. A future migration must use
+# Only schema v1 is verified with v0.4.1/v0.5.0/v0.5.1. A future migration must use
 # a paired pre-upgrade database; never blindly open it with older code.
 python3 - "$root/data/monitor.sqlite" "$release/package.json" <<'PYSCHEMA'
 import sqlite3,sys,json
-if json.load(open(sys.argv[2])).get('version') not in ['0.4.1','0.5.0']:
+if json.load(open(sys.argv[2])).get('version') not in ['0.4.1','0.5.0','0.5.1']:
     raise SystemExit('Selected release requires a paired database/image restore')
 with sqlite3.connect(sys.argv[1]) as db:
     if db.execute('PRAGMA user_version').fetchone()[0] != 1:

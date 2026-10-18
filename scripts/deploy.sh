@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 cd "$(dirname "$0")/.."
 target=${1:?Usage: scripts/deploy.sh SSH_HOST}
 [[ "$target" =~ ^[a-zA-Z0-9._-]+$ ]] || { echo 'Use an SSH host alias.' >&2; exit 1; }
@@ -24,6 +25,7 @@ ssh "${ssh_args[@]}" "$target" "if [ -f '$root/config/checks.json' ]; then cp '$
 ssh "${ssh_args[@]}" "$target" "test -f '$root/config/checks.json'" || scp "${ssh_args[@]}" config/checks.json "$target:$root/config/checks.json"
 ssh "${ssh_args[@]}" "$target" "bash -s" -- "$release" <<'REMOTE'
 set -euo pipefail
+umask 077
 release=$1
 root=/srv/stacks/hostboard
 chmod 600 "$root/.env"
