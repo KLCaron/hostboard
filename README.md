@@ -1,5 +1,7 @@
 # Hostboard
 
+> Release status: the initial v0.5.0 image has a native local-login failure. The fix is on `main`; use the corrected release once published. Existing Cloudflare Access deployments are unaffected.
+
 A self-hosted dashboard for servers monitored by **Netdata Agents**. View live metrics, historical charts, Docker resources, Netdata alerts, service availability, and persistent incidents in one place.
 
 Hostboard queries existing Agents directly. It does not replace Netdata's collectors, metric storage, retention, or alert engine, and does not require Netdata Cloud. Its own SQLite database stores service checks, incidents, notification delivery state, and application preferences.
