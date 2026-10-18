@@ -128,3 +128,53 @@ test('pause freezes historical requests while resume restores a moving window',a
   await resumedRequest;
   await expect(explorer.getByRole('button',{name:'Pause',exact:true})).toBeVisible();
 });
+
+test('dragging the plot and timeline selects a real range and zoom queries that range',async({page,request},info)=>{
+  const fleet=await (await request.get('/api/fleet')).json();
+  await page.goto(`/#host=${fleet.hosts[0].id}`);
+  const explorer=page.locator('.host-card.expanded').getByRole('region',{name:'Metric investigation'});
+  const response=page.waitForResponse(r=>{if(!r.url().includes('/metric-history?')||!r.ok())return false;const q=new URL(r.url()).searchParams;return Number(q.get('before'))-Number(q.get('after'))===900;});
+  await explorer.getByRole('button',{name:'15m',exact:true}).click();
+  const history=await (await response).json();
+  await expect(explorer.getByText('Available retention:',{exact:false})).toBeVisible();
+  const plot=explorer.locator('.selectable-chart');await plot.scrollIntoViewIfNeeded();
+  const box=(await plot.boundingBox())!;
+  const left=box.x+54,width=box.width-66,y=box.y+box.height/2;
+  await page.mouse.move(left+width*.2,y);await page.mouse.down();
+  await page.mouse.move(left+width*.7,y,{steps:12});await page.mouse.up();
+  await expect(explorer.getByRole('status',{name:'Selected time window'})).toContainText('Selected:');
+  await expect(explorer.getByRole('button',{name:'Resume live'})).toBeVisible();
+  const zoom=explorer.getByRole('button',{name:'Zoom to brushed selection'});
+  await expect(zoom).toBeEnabled();
+  const start=explorer.getByRole('slider',{name:'Selection start'}),end=explorer.getByRole('slider',{name:'Selection end'});
+  await page.clock.install();
+  const backgroundRequests:string[]=[];
+  page.on('request',r=>{if(r.url().includes('/metric-history?'))backgroundRequests.push(r.url());});
+  await page.clock.fastForward(35000);
+  expect(backgroundRequests).toEqual([]);
+  const initialStart=Number(await start.getAttribute('aria-valuenow'));
+  expect(initialStart).toBeGreaterThan(0);
+  expect(Number(await end.getAttribute('aria-valuenow'))).toBeLessThan(history.points.length-1);
+  // Both handles support keyboard adjustment in addition to pointer dragging.
+  await start.focus();await page.keyboard.press('ArrowRight');
+  await expect.poll(async()=>Number(await start.getAttribute('aria-valuenow'))).toBe(initialStart+1);
+  const startIndex=Number(await start.getAttribute('aria-valuenow')),endIndex=Number(await end.getAttribute('aria-valuenow'));
+  const zoomRequest=page.waitForRequest(r=>r.url().includes('/metric-history?'));
+  await zoom.click();const url=new URL((await zoomRequest).url());
+  expect(Number(url.searchParams.get('after'))).toBe(history.points[startIndex].time);
+  expect(Number(url.searchParams.get('before'))).toBe(history.points[endIndex].time);
+  await expect(explorer.getByText('Available retention:',{exact:false})).toBeVisible();
+  await expect(zoom).toBeDisabled();
+  // The timeline also accepts a new selection anywhere on its track, right-to-left.
+  const track=explorer.locator('.history-brush-track');await track.scrollIntoViewIfNeeded();
+  const b=(await track.boundingBox())!;
+  await page.mouse.move(b.x+b.width*.8,b.y+b.height/2);await page.mouse.down();
+  await page.mouse.move(b.x+b.width*.3,b.y+b.height/2,{steps:10});await page.mouse.up();
+  await expect(zoom).toBeEnabled();
+  const handle=(await end.boundingBox())!;const previousEnd=Number(await end.getAttribute('aria-valuenow'));
+  await page.mouse.move(handle.x+handle.width/2,handle.y+handle.height/2);await page.mouse.down();
+  await page.mouse.move(handle.x+handle.width/2-b.width*.1,handle.y+handle.height/2,{steps:8});await page.mouse.up();
+  await expect.poll(async()=>Number(await end.getAttribute('aria-valuenow'))).toBeLessThan(previousEnd);
+  await page.screenshot({path:`.ai-local/${info.project.name}-brush-selection.png`});
+  await explorer.getByRole('button',{name:'Clear selection'}).click();await expect(zoom).toBeDisabled();
+});

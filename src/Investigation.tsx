@@ -1,6 +1,7 @@
+import { HistorySelection, type Selection } from './HistorySelection';
 import { servicesFromHosts } from './services';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Brush, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import type { Host, Container, Range } from './types';
 import type { AlertDetail, AlertHistory, Diagnostic, Metric, MetricHistory, Window as TimeWindow } from './investigation-types';
 import { containerStatus, readPreference, savePreference, sortContainers, type Sort } from './preferences';
@@ -46,19 +47,19 @@ export function Explorer({ host, charts, initialChart, initialWindow, range = '1
   const [customError, setCustomError] = useState('');
   const [after, setAfter] = useState(localDate(initialWindow?.after || Date.now()/1000-seconds[preset]));
   const [before, setBefore] = useState(localDate(initialWindow?.before || Date.now()/1000));
-  const [selection, setSelection] = useState<{startIndex?: number; endIndex?: number}>({});
+  const [selection, setSelection] = useState<Selection | null>(null);
   useEffect(() => { if (paused || window) return; const timer = setInterval(() => setTick(v => v+1), 30000); return () => clearInterval(timer); }, [paused, window]);
   const liveEnd = useMemo(() => Math.floor(Date.now()/1000), [tick, preset]);
   const end = window?.before || liveEnd;
   const start = window?.after || end-seconds[preset];
   const url = chart ? `/api/hosts/${host.id}/metric-history?chart=${encodeURIComponent(chart)}&after=${Math.floor(start)}&before=${Math.floor(end)}&tick=${tick}` : null;
   const { data, error, loading } = useData<MetricHistory>(url, 0);
-  useEffect(() => { if (data && !data.dimensions.includes(dimension)) setDimension(data.dimensions[0] || ''); setSelection({}); }, [data]);
+  useEffect(() => { if (data && !data.dimensions.includes(dimension)) setDimension(data.dimensions[0] || ''); setSelection(null); }, [data]);
   const metric = charts.find(c => c.id === chart);
   const points = data?.points || [];
   const values = (agg: string) => points.map(p => p[`${dimension}:${agg}`]).filter((v): v is number => typeof v === 'number');
   const lo = values('min'), hi = values('max'), avg = values('average');
-  const fixed = (w: TimeWindow) => { setWindow(w); setPaused(true); setSelection({}); };
+  const fixed = (w: TimeWindow) => { setWindow(w); setPaused(true); setSelection(null); };
   const pan = (direction: number) => { const width = end-start; const b = Math.min(Math.floor(Date.now()/1000), Math.floor(end+width*direction/2)); fixed({ after: Math.floor(b-width), before: b }); };
   const zoom = (factor: number) => { const width = Math.min(31*86400, Math.max(30, (end-start)*factor)); fixed({ after: Math.floor(end-width), before: Math.floor(end) }); };
   return <section className="explorer" aria-label="Metric investigation">
@@ -87,15 +88,15 @@ export function Explorer({ host, charts, initialChart, initialWindow, range = '1
       <div className="chart-statistics"><span>Min <b>{lo.length?fmt(Math.min(...lo)):'—'}</b></span><span>Peak <b>{hi.length?fmt(Math.max(...hi)):'—'}</b></span><span>Average <b>{avg.length?fmt(avg.reduce((a,b)=>a+b,0)/avg.length):'—'}</b></span><span>{metric?.units}</span></div>
       <p className="detail-description">Solid: average · gold: bucket peak · muted: minimum. Extrema apply to the selected dimension. Gaps mean no data. Average is across returned buckets.</p>
       {points.some(p=>p[`${dimension}:average`] != null) ? <>
-      <div className="history-chart"><ResponsiveContainer width="100%" height="100%"><LineChart data={points} margin={{left:0,right:12,top:8,bottom:0}}>
+      <HistorySelection times={points.map(p=>p.time)} selection={selection} onChange={setSelection} onStart={()=>setPaused(true)}><ResponsiveContainer width="100%" height="100%"><LineChart data={points} margin={{left:0,right:12,top:8,bottom:0}}>
         <CartesianGrid vertical={false} stroke="#292e36"/><XAxis dataKey="time" type="number" domain={['dataMin','dataMax']} tickFormatter={t=>new Date(t*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})} minTickGap={45} tick={{fontSize:12}}/><YAxis width={54} tick={{fontSize:12}} domain={['auto','auto']}/>
         <Tooltip labelFormatter={t=>date(Number(t))} formatter={(v)=>fmt(typeof v==='number'?v:null)} contentStyle={{background:'#20252d',border:'1px solid #404753',borderRadius:8}}/>
         <Line dataKey={`${dimension}:min`} name="Minimum" stroke="#71808e" dot={false} isAnimationActive={false} connectNulls={false}/>
         <Line dataKey={`${dimension}:max`} name="Peak" stroke="#dfbe8b" dot={false} isAnimationActive={false} connectNulls={false}/>
         <Line dataKey={`${dimension}:average`} name="Average" stroke="#b9e692" strokeWidth={2} dot={false} isAnimationActive={false} connectNulls={false}/>
-        <Brush dataKey="time" height={25} stroke="#819672" fill="#191e25" tickFormatter={t=>new Date(t*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})} onChange={s=>setSelection(s)}/>
-      </LineChart></ResponsiveContainer></div>
-      <button className="subtle-button" disabled={selection.startIndex==null||selection.endIndex==null||selection.startIndex===selection.endIndex} onClick={()=>{ const a=points[selection.startIndex!]?.time,b=points[selection.endIndex!]?.time;if(b-a>=30)fixed({after:a,before:b}); }}>Zoom to brushed selection</button>
+
+      </LineChart></ResponsiveContainer></HistorySelection>
+      <button className="subtle-button" disabled={!selection || points[selection.endIndex].time-points[selection.startIndex].time<30} onClick={()=>{ const a=points[selection!.startIndex]?.time,b=points[selection!.endIndex]?.time;if(b-a>=30)fixed({after:a,before:b}); }}>Zoom to brushed selection</button>
       </> : <p className="empty-chart">No recorded samples in this window. Choose another range or metric.</p>}
       <p className="detail-description">Available retention: {date(data.retention.first)} — {date(data.retention.last)} · returned buckets: {fmt(data.retention.interval)}s. Retention and resolution vary by metric and Netdata storage tier; spikes shorter than collection resolution cannot be recovered.</p>
       {!!data.errors.length && <div className="notice">{data.errors.join(' · ')}</div>}
