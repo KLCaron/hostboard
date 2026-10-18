@@ -75,7 +75,7 @@ The integration uses `/api/v3/nodes`, `/api/v3/contexts`, `/api/v3/data`, `/api/
 
 ## Configuration management and administrative security
 
-The v0.4 release candidate includes writable Settings, with administration locked until the operator supplies an explicit identity policy. Copy [config/admin.example.json](config/admin.example.json) to ignored `private/admin.json`, readable by container uid 1000, and customize it before restarting Hostboard. Compose mounts the private directory read-only; `HOSTBOARD_ADMIN_CONFIG` can select another deployment-managed path.
+Hostboard v0.4 includes writable Settings. Administration remains locked until the operator supplies an explicit identity policy. Copy [config/admin.example.json](config/admin.example.json) to ignored `private/admin.json`, readable by container uid 1000, and customize it before restarting Hostboard. Compose mounts the private directory read-only; `HOSTBOARD_ADMIN_CONFIG` can select another deployment-managed path.
 
 | Setting | Owner and persistence |
 | --- | --- |
