@@ -92,6 +92,7 @@ assert.ok(Array.isArray(monitor.activeIncidents));
 assert.ok(monitor.activeIncidents.every(i => i.endedAt === null));
 assert.equal(new Set(monitor.activeIncidents.map(i => i.id)).size, monitor.activeIncidents.length);
 for (const check of monitor.checks) {
+  if(check.state==='disabled')continue;
   assert.equal(check.state, 'up', `${check.name}: reachability`);
   assert.ok(check.checkedAt > 0 && check.lastSuccessfulAt > 0, `${check.name}: observation and last success`);
   assert.ok(check.trend.some(p => p.responseMs !== null), `${check.name}: retained response history`);
@@ -102,3 +103,17 @@ for (const section of ['overview', 'servers', 'services', 'issues', 'settings', 
   assert.match(response.headers.get('cache-control') || '', /no-cache/);
 }
 console.log(`${monitor.checks.length}/${monitor.checks.length} service checks reachable; scheduler, retained trends, active incidents and section/legacy paths verified.`);
+
+const preferences=await fetchApi('/api/preferences');
+assert.ok(preferences.general.refreshSeconds>=10&&preferences.general.refreshSeconds<=300);
+assert.deepEqual(Object.keys(preferences),['general']);
+const system=await fetchApi('/api/system');
+assert.equal(system.activeChecks,monitor.checks.filter(c=>c.state!=='disabled').length);
+assert.equal(system.servers.length,fleet.hosts.length);
+assert.ok(system.version&&Date.now()/1000-system.generatedAt<30);
+for(const [endpoint,method] of [['config','GET'],['settings','PUT'],['checks','POST'],['checks/not-a-check','PUT'],['checks/not-a-check/archive','POST'],['checks/test','POST'],['mail-test','POST']]){
+ const r=await fetch(new URL('/api/admin/'+endpoint,base),{method,headers:{'Content-Type':'application/json','Origin':new URL(base).origin,'X-Hostboard-Request':'1','Cf-Access-Authenticated-User-Email':'forged@example.com','Cf-Access-Jwt-Assertion':'forged'},...(method==='GET'?{}:{body:'{}'})});
+ assert.equal(r.status,403,`${endpoint}: unsigned administrative access must fail`);
+ assert.equal(r.headers.get('access-control-allow-origin'),null);
+}
+console.log('Configuration defaults, system status and unsigned administrative read/write denials verified; no test email sent.');
