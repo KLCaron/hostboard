@@ -10,6 +10,7 @@ test('local administrator signs in and out using native forms; unauthenticated a
   await new Promise<void>(r=>server.once('listening',r));
   const origin=`http://127.0.0.1:${(server.address() as {port:number}).port}`;
   const config=LocalSchema.parse({mode:'local',origin,username:'operator',passwordHash:await hash('correct test password',{memoryCost:65536,timeCost:3,parallelism:1}),sessionSecret:randomBytes(32).toString('hex'),targets:[]});
+  app.use((_req,res,next)=>{res.set("Referrer-Policy","no-referrer");next();});
   const stop=localAuthentication(app,config);
   app.use('/api/admin',authorization(config).guard,express.json());
   app.post('/api/admin/save',(_req,res)=>res.json({saved:true}));

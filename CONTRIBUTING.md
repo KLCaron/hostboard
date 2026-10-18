@@ -10,8 +10,11 @@ npx playwright install --with-deps firefox
 npm run test:browser
 node scripts/check-licenses.mjs
 docker build -t hostboard:ci .
+HOSTBOARD_TEST_IMAGE=hostboard:ci npm run test:image-browser
 HOSTBOARD_TEST_IMAGE=hostboard:ci python3 tests/clean_install.py
 ```
+
+The image browser check exercises real login, dashboard, administrator Settings and logout against the built container with a controlled Agent, including the application security headers.
 
 The browser runner starts an isolated backend and controlled Netdata-compatible fixture automatically; it never contacts live Agents. Clean-install acceptance clones the committed repository into a temporary directory, runs an actual Compose project with a controlled Agent and registry, exercises setup/auth/configuration/persistence/upgrade/backup/restore/failure handling, and removes its services. Commit the candidate files before this test. On a local host requiring sudo for Docker, use `DOCKER='sudo -n docker' HOSTBOARD_TEST_IMAGE=hostboard:ci python3 tests/clean_install.py`. The test forwards only its Compose/image variables through sudo.
 

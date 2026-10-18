@@ -19,7 +19,9 @@ export function localAuthentication(app: Express, config: LocalConfig) {
     name, secret: config.sessionSecret, store, resave: false, saveUninitialized: false,
     cookie: { httpOnly: true, secure, sameSite: "strict", maxAge: TTL, path: "/" },
   }));
-  app.use("/auth", (_req, res, next) => { res.set("Cache-Control", "no-store"); next(); });
+  // no-referrer makes native form POSTs emit Origin: null. Preserve same-origin
+  // Origin validation while keeping referrers private across origins.
+  app.use("/auth", (_req, res, next) => { res.set({"Cache-Control": "no-store", "Referrer-Policy": "same-origin"}); next(); });
   const csrf = (req: express.Request) => {
     if (!req.session.csrf) req.session.csrf = randomBytes(32).toString("hex");
     return req.session.csrf;
