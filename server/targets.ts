@@ -83,3 +83,12 @@ export class TargetPolicy {
       throw Error("Monitoring URLs must not contain query strings");
   }
 }
+
+// Existing literal destinations come from the operator-owned bootstrap file, never
+// from editable database rows. Without an admin policy, DNS destinations fail closed.
+export function bootstrapTargets(checks: CheckConfig[]): TargetRule[] {
+  return checks.flatMap((c) => {
+    const { host, port } = endpoint(c);
+    return net.isIP(host) ? [{ host, port, addresses: [host] }] : [];
+  });
+}

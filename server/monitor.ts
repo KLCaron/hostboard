@@ -50,7 +50,7 @@ export class Monitor {
   deleted = new Set<string>();
   preferences?: Settings;
   policy?: TargetPolicy;
-  private generation = 0;
+  private epochs = new Map<string, number>();
   constructor(
     public config: ChecksConfig,
     filename: string | DatabaseSync,
@@ -91,8 +91,12 @@ export class Monitor {
           .prepare("UPDATE incidents SET monitoringGap=1 WHERE id=?")
           .run(row.active);
   }
-  configure(config: ChecksConfig, now = seconds()) {
-    this.generation++;
+  configure(
+    config: ChecksConfig,
+    now = seconds(),
+    disabled = this.disabled,
+    deleted = this.deleted,
+  ) {
     for (const check of config.checks) {
       const {
         group: _group,
@@ -109,6 +113,12 @@ export class Monitor {
       const previous = this.db
         .prepare("SELECT fingerprint FROM check_evaluation WHERE id=?")
         .get(check.id) as { fingerprint: string } | undefined;
+      if (
+        !this.epochs.has(check.id) ||
+        previous?.fingerprint !== fingerprint ||
+        this.disabled.has(check.id) !== disabled.has(check.id)
+      )
+        this.epochs.set(check.id, (this.epochs.get(check.id) ?? 0) + 1);
       if (old && previous && previous.fingerprint !== fingerprint) {
         if (old.active)
           this.db
@@ -144,6 +154,8 @@ export class Monitor {
         .run(check.id, fingerprint);
     }
     this.config = config;
+    this.disabled = disabled;
+    this.deleted = deleted;
   }
   private state(id: string) {
     return this.db
@@ -512,11 +524,18 @@ export class Monitor {
         )
           continue;
         this.running.add(check.id);
-        const generation = this.generation;
+        const epoch = this.epochs.get(check.id);
         void probe(check, this.policy)
           .then((result) => {
-            if (!this.stopped && generation === this.generation) {
-              this.record(check, result);
+            if (
+              !this.stopped &&
+              epoch === this.epochs.get(check.id) &&
+              !this.disabled.has(check.id)
+            ) {
+              this.record(
+                this.config.checks.find((c) => c.id === check.id)!,
+                result,
+              );
               this.storageError = false;
             }
           })

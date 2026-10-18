@@ -5,19 +5,20 @@ import { randomUUID } from "node:crypto";
 import { CheckSchema, type CheckConfig } from "./check-config.js";
 import { Configuration, SettingsSchema } from "./settings.js";
 import { authorization, type AdminConfig } from "./admin.js";
-import { TargetPolicy } from "./targets.js";
+import { TargetPolicy, type TargetRule } from "./targets.js";
 import type { Monitor } from "./monitor.js";
 import { probe } from "./probe.js";
 export function synchronize(store: Configuration, monitor: Monitor) {
-  monitor.configure(store.runtime());
-  monitor.preferences = store.settings();
   const checks = store.checks();
-  monitor.disabled = new Set(
-    checks.filter((c) => !c.enabled || c.deleted).map((c) => c.definition.id),
+  monitor.configure(
+    store.runtime(),
+    undefined,
+    new Set(
+      checks.filter((c) => !c.enabled || c.deleted).map((c) => c.definition.id),
+    ),
+    new Set(checks.filter((c) => c.deleted).map((c) => c.definition.id)),
   );
-  monitor.deleted = new Set(
-    checks.filter((c) => c.deleted).map((c) => c.definition.id),
-  );
+  monitor.preferences = store.settings();
   for (const id of monitor.disabled)
     monitor.db
       .prepare(
@@ -61,10 +62,11 @@ export function configAPI(
   admin: AdminConfig | null,
   hostIds: string[],
   auth = authorization(admin),
+  fallbackTargets: TargetRule[] = [],
 ) {
   const router = Router(),
-    policy = new TargetPolicy(admin?.targets ?? []);
-  monitor.policy = admin ? policy : undefined;
+    policy = new TargetPolicy(admin?.targets ?? fallbackTargets);
+  monitor.policy = policy;
   router.get("/preferences", (_req, res) =>
     res.json({ general: store.settings().general }),
   );

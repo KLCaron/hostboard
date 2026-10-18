@@ -1,5 +1,5 @@
 import express from "express";
-import {readFileSync} from "node:fs";
+import { readFileSync } from "node:fs";
 import { validateWindow } from "./investigation.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,13 +9,15 @@ import type { Range } from "../src/types.js";
 import { loadChecks } from "./check-config.js";
 import { Monitor } from "./monitor.js";
 import { smtpDelivery } from "./notifications.js";
+import { bootstrapTargets } from "./targets.js";
 import { Configuration } from "./settings.js";
 import { loadAdmin } from "./admin.js";
 import { configAPI, synchronize } from "./config-api.js";
 const agents = loadConfig().hosts.map((host) => new Agent(host));
+const seed = loadChecks(agents.map((a) => a.config.id));
 const configuration = new Configuration(
   process.env.HOSTBOARD_DB || "data/monitor.sqlite",
-  loadChecks(agents.map((a) => a.config.id)),
+  seed,
 );
 const monitor = new Monitor(
   configuration.runtime(),
@@ -48,13 +50,16 @@ app.use(
     monitor,
     admin,
     agents.map((a) => a.config.id),
+    undefined,
+    bootstrapTargets(seed.checks),
   ),
 );
 app.get("/api/system", async (_req, res) => {
   const hosts = await Promise.all(agents.map((a) => a.current()));
   const view = monitor.view();
   res.json({
-    version: JSON.parse(readFileSync(path.resolve("package.json"),"utf8")).version,
+    version: JSON.parse(readFileSync(path.resolve("package.json"), "utf8"))
+      .version,
     generatedAt: Date.now() / 1000,
     servers: hosts.map((h) => ({
       id: h.id,

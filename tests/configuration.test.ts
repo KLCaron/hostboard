@@ -551,3 +551,52 @@ test("retention reductions require confirmation and consistent recovery backups;
   );
   assert.equal(f.store.settings().retention.sampleDays, 30);
 });
+
+test("general and presentation updates preserve in-flight unrelated checks; disabling discards only that check observation", async (t) => {
+  let release: (() => void) | undefined, entered: (() => void) | undefined;
+  let ready = new Promise<void>((r) => (entered = r));
+  const server = http.createServer((_req, res) => {
+    release = () => {
+      res.statusCode = 503;
+      res.end("controlled");
+    };
+    entered?.();
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const c = CheckSchema.parse({
+    ...check,
+    url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/`,
+    intervalSeconds: 10,
+    notify: false,
+  });
+  const m = new Monitor(ChecksSchema.parse({ checks: [c] }), ":memory:", null);
+  t.after(() => {
+    m.stop();
+    server.closeAllConnections();
+    server.close();
+    m.db.close();
+  });
+  m.start();
+  await ready;
+  m.configure(
+    ChecksSchema.parse({
+      checks: [
+        { ...c, name: "Renamed during observation", group: "Infrastructure" },
+      ],
+    }),
+  );
+  release!();
+  const deadline = Date.now() + 1000;
+  while (!m.view().checks[0].checkedAt && Date.now() < deadline)
+    await new Promise((r) => setTimeout(r, 10));
+  assert.equal(m.view().checks[0].state, "down");
+  assert.equal(m.view().incidents[0].name, "Renamed during observation");
+  ready = new Promise<void>((r) => (entered = r));
+  m.db.prepare("UPDATE checks SET checked=NULL").run();
+  await ready;
+  m.configure(m.config, undefined, new Set([c.id]));
+  release!();
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(m.db.prepare("SELECT COUNT(*) n FROM samples").get()?.n, 1);
+  assert.equal(m.view().checks[0].state, "disabled");
+});
