@@ -33,6 +33,7 @@ test('observed availability failure, failed delivery, recovery and bookmarked in
     await page.getByLabel('Issue type',{exact:true}).selectOption('notification');
     await expect(page.locator('.issue-record[data-issue-type=availability]')).toHaveCount(0);
     await page.getByRole('link',{name:'Notification status →'}).click();
+    await page.getByRole('tab',{name:'Notifications',exact:true}).click();
     await expect(page.getByText('Delivery needs attention',{exact:true})).toBeVisible();
     healthy=true;monitor.record(check,await probe(check));
     await page.goto(`/#incident=${incident.id}`);

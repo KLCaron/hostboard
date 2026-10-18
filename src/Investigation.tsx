@@ -1,3 +1,4 @@
+import {useDisplay} from './display';
 import type { CheckView } from './monitor-types';
 import { checkLabel } from './Monitoring';
 import { HistorySelection, type Selection } from './HistorySelection';
@@ -40,6 +41,7 @@ function localDate(t: number) {
 export function Explorer({ host, charts, initialChart, initialWindow, range = '1h' }: {
   host: Host; charts: Metric[]; initialChart?: string; initialWindow?: TimeWindow; range?: Range;
 }) {
+  const display=useDisplay();
   const [chart, setChart] = useState(initialChart || readPreference(`metric:${host.id}:${charts[0]?.group}`,charts[0]?.id || '',v=>charts.some(c=>c.id===v)));
   useEffect(()=>{savePreference(`metric:${host.id}:${charts[0]?.group}`,chart);},[chart,host.id]);
   const [preset, setPreset] = useState<Range>(() => readPreference('chartRange', range, v => typeof v === 'string' && v in seconds));
@@ -58,7 +60,9 @@ export function Explorer({ host, charts, initialChart, initialWindow, range = '1
   const { data, error, loading } = useData<MetricHistory>(url, 0);
   useEffect(() => { if (data && !data.dimensions.includes(dimension)) setDimension(data.dimensions[0] || ''); setSelection(null); }, [data]);
   const metric = charts.find(c => c.id === chart);
-  const points = data?.points || [];
+  const isTemperature=/celsius|°c/i.test(metric?.units??'');
+  const units=isTemperature?`°${display.temperature}`:metric?.units;
+  const points=(data?.points||[]).map(p=>isTemperature&&display.temperature==='F'?Object.fromEntries(Object.entries(p).map(([k,v])=>[k,k==='time'||v===null?v:v*9/5+32])) as typeof p:p);
   const values = (agg: string) => points.map(p => p[`${dimension}:${agg}`]).filter((v): v is number => typeof v === 'number');
   const lo = values('min'), hi = values('max'), avg = values('average');
   const fixed = (w: TimeWindow) => { setWindow(w); setPaused(true); setSelection(null); };
@@ -81,13 +85,13 @@ export function Explorer({ host, charts, initialChart, initialWindow, range = '1
       <label>From<input required type="datetime-local" value={after} onChange={e=>setAfter(e.target.value)}/></label><label>To<input required type="datetime-local" value={before} onChange={e=>setBefore(e.target.value)}/></label><button type="submit">Apply window</button>
       {customError && <p role="alert">{customError}</p>}
     </form></details>
-    <p className="detail-description">{date(start)} — {date(end)} · {paused ? 'Paused' : 'Live · updates every 30s'} · {metric?.units}</p>
+    <p className="detail-description">{date(start)} — {date(end)} · {paused ? 'Paused' : 'Live · updates every 30s'} · {units}</p>
     {host.status !== 'online' && <div className="notice">Host {host.status}. Retained history may still be available; these readings are not live.</div>}
     {error && <div className="notice danger" role="alert">{error} <button onClick={()=>setTick(v=>v+1)}>Retry</button></div>}
     {loading && <p role="status">Loading history…</p>}
     {data && <>
       <select aria-label="Chart dimension" value={dimension} onChange={e=>setDimension(e.target.value)}>{data.dimensions.map(d=><option key={d}>{d}</option>)}</select>
-      <div className="chart-statistics"><span>Min <b>{lo.length?fmt(Math.min(...lo)):'—'}</b></span><span>Peak <b>{hi.length?fmt(Math.max(...hi)):'—'}</b></span><span>Average <b>{avg.length?fmt(avg.reduce((a,b)=>a+b,0)/avg.length):'—'}</b></span><span>{metric?.units}</span></div>
+      <div className="chart-statistics"><span>Min <b>{lo.length?fmt(Math.min(...lo)):'—'}</b></span><span>Peak <b>{hi.length?fmt(Math.max(...hi)):'—'}</b></span><span>Average <b>{avg.length?fmt(avg.reduce((a,b)=>a+b,0)/avg.length):'—'}</b></span><span>{units}</span></div>
       <p className="detail-description">Solid: average · gold: bucket peak · muted: minimum. Extrema apply to the selected dimension. Gaps mean no data. Average is across returned buckets.</p>
       {points.some(p=>p[`${dimension}:average`] != null) ? <>
       <HistorySelection times={points.map(p=>p.time)} selection={selection} onChange={setSelection} onStart={()=>setPaused(true)}><ResponsiveContainer width="100%" height="100%"><LineChart data={points} margin={{left:0,right:12,top:8,bottom:0}}>

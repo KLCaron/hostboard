@@ -1774,3 +1774,63 @@ summary {cursor:pointer;}
   .issue-filters label { min-width:0; }
   .health-summary { align-items:flex-start; }.health-summary h2 { font-size:18px; }
 }
+
+/* Settings and browser-local Overview customization. */
+.settings-tabs { display:flex;gap:6px;flex-wrap:wrap;margin:20px 0; }
+.settings-tabs button,.settings-actions button,.dashboard-toolbar button,.widget-controls button,.settings-service-list button,.settings-view button:not(.text-link),.widget-controls select {border:1px solid #343b44;border-radius:8px;padding:9px 12px;background:#1d222a;color:#c9d0d8;font-size:13px;}
+.settings-tabs [aria-selected=true] {background:#2d392a;color:#c4e9a7;border-color:#586a4b;}
+.settings-fields {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;margin:22px 0;max-width:900px;}
+.settings-fields label,.settings-scope label,.metric-selectors label {display:flex;flex-direction:column;gap:8px;font-size:13px;color:#d4dae1;min-width:0;}
+.settings-fields input:not([type=checkbox]),.settings-fields select,.settings-scope select,.metric-selectors select {background:#12161d;border:1px solid #39424b;border-radius:7px;padding:10px;color:#d4dae1;width:100%;min-width:0;}
+.settings-fields small,.settings-service-list small {color:#909aa7;font-size:12px;line-height:1.6;}
+.settings-fields .check-label {flex-direction:row;align-items:center;align-self:start;}
+.settings-fields input[type=checkbox],.widget-visibility input {accent-color:#bbdf93;}
+.wide-field {grid-column:1/-1;}
+.settings-actions {display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:22px 0;}
+.settings-actions .primary-button,.dashboard-toolbar .primary-button {background:#b9de93;color:#1b2417;border-color:#b9de93;}
+.settings-service-list>div {display:flex;justify-content:space-between;align-items:center;gap:15px;padding:15px 0;border-bottom:1px solid #30343b;}
+.settings-service-list span {min-width:0;overflow-wrap:anywhere;}
+.settings-service-list small {display:block;margin-top:6px;}
+.settings-panel-heading {display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center;}
+.settings-view .monitor-panel {margin-bottom:20px;}
+.settings-view code {overflow-wrap:anywhere;}
+.settings-scope {max-width:300px;margin:18px 0;}
+.settings-view form .danger-text {color:#e9a39a;}
+.dashboard-toolbar {display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center;margin:14px 0 20px;}
+.dashboard-toolbar>div {display:flex;gap:8px;flex-wrap:wrap;}
+.dashboard-grid {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;align-items:start;}
+.dashboard-widget {min-width:0;}
+.dashboard-widget.full {grid-column:1/-1;}
+.dashboard-widget.tall {min-height:420px;}
+.dashboard-widget.tall>.host-card,.dashboard-widget.tall>.monitor-panel {min-height:420px;}
+.dashboard-widget .fleet-stats {margin:0;}
+.dashboard-widget .health-summary {margin:0;}
+.dashboard-widget.half .fleet-stats {grid-template-columns:repeat(2,minmax(0,1fr));}
+.editing .dashboard-widget {border:1px dashed #607352;border-radius:14px;padding:10px;}
+.widget-controls {display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:12px;}
+.widget-controls button,.widget-controls select {padding:6px 8px;font-size:12px;}
+.widget-controls .drag-handle {cursor:grab;flex:1;min-width:100px;text-align:left;}
+.widget-visibility {border:1px solid #343c45;border-radius:12px;margin:0 0 22px;padding:15px;display:flex;gap:18px;flex-wrap:wrap;}
+.widget-visibility legend {padding:0 8px;font-size:13px;color:#bbc8b1;}
+.widget-visibility label {display:flex;gap:8px;align-items:center;font-size:13px;}
+.metric-widget {margin:0;}
+.metric-widget h2 {font-size:17px;overflow-wrap:anywhere;}
+.metric-selectors {display:grid;gap:12px;margin:15px 0;}
+.preferred-chart {height:220px;min-width:0;margin:20px 0;}
+.preferred-chart.tall {height:360px;}
+.overview-range {display:flex;gap:16px;justify-content:flex-end;align-items:center;}
+.compact .dashboard-grid {gap:12px;}
+.compact .dashboard-widget .host-heading {padding-top:14px;}
+.compact .dashboard-widget .monitor-panel {padding:16px;}
+.check-state.disabled {color:#9ca6b3;background:#282c34;}
+@media(max-width:760px){
+ .settings-fields {grid-template-columns:minmax(0,1fr);}
+ .dashboard-grid {grid-template-columns:minmax(0,1fr);}
+ .dashboard-widget {grid-column:1/-1;}
+ .dashboard-widget.tall {min-height:0;}
+ .dashboard-widget .fleet-stats {grid-template-columns:repeat(2,minmax(0,1fr));}
+ .overview-range {justify-content:space-between;flex-wrap:wrap;}
+ .settings-actions {gap:8px;}
+}
+.settings-view .settings-tabs button[aria-selected=true] {background:#2d392a;color:#c4e9a7;border-color:#586a4b;}
+.settings-view .settings-actions button.primary-button {background:#b9de93;color:#1b2417;border-color:#b9de93;}

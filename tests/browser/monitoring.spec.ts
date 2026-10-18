@@ -36,6 +36,7 @@ test('five sections, real checks and groupings, expanded trends, settings and co
   await expect(card.locator('.response-chart svg').first()).toBeVisible();
   await page.screenshot({path:`.ai-local/v031-${info.project.name}-services.png`,fullPage:true});
   await nav.getByRole('button',{name:'Settings',exact:true}).click();
+  await page.getByRole('tab',{name:'Notifications',exact:true}).click();
   await expect(page.getByRole('heading',{name:'Notification delivery',exact:true})).toBeVisible();
   await expect(page.getByText(/SMTP acceptance does not confirm inbox receipt/)).toBeVisible();
   await expect(page.getByText(monitor.notifications.configured?'SMTP configured':'Not configured',{exact:true})).toBeVisible();
