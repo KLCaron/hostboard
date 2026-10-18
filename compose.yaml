@@ -1,0 +1,30 @@
+name: hostboard
+services:
+  hostboard:
+    image: hostboard:${HOSTBOARD_TAG:-local}
+    build: .
+    restart: unless-stopped
+    # Linux host networking lets the backend reach the private loopback Agent.
+    # The HTTP listener binds only to HOSTBOARD_BIND, never all interfaces.
+    network_mode: host
+    environment:
+      HOSTBOARD_BIND: ${HOSTBOARD_BIND:-127.0.0.1}
+      PORT: ${HOSTBOARD_PORT:-8088}
+      HOSTBOARD_CONFIG: /app/config/hosts.json
+    volumes:
+      - ./config/hosts.json:/app/config/hosts.json:ro
+    read_only: true
+    tmpfs:
+      - /tmp:size=16M,noexec,nosuid
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 384m
+    cpus: 1.0
+    pids_limit: 100
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'

@@ -1,0 +1,11 @@
+.git
+node_modules
+dist
+.ai-local
+.agents
+.codex
+.aws
+.env*
+config/hosts.json
+test-results
+playwright-report

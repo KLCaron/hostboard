@@ -1,0 +1,6 @@
+{
+  "hosts": [
+    { "id": "server-a", "name": "Server A", "url": "http://127.0.0.1:19999", "node": "server-a" },
+    { "id": "server-b", "name": "Server B", "url": "http://127.0.0.1:19999", "node": "server-b" }
+  ]
+}
