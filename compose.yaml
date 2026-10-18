@@ -5,7 +5,7 @@ services:
     build: .
     restart: unless-stopped
     # Linux host networking lets the backend reach the private loopback Agent.
-    # The HTTP listener binds only to HOSTBOARD_BIND, never all interfaces.
+    # HTTP binds to HOSTBOARD_BIND and IPv4 loopback, never all interfaces.
     network_mode: host
     environment:
       HOSTBOARD_BIND: ${HOSTBOARD_BIND:-127.0.0.1}

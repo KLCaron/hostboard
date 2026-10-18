@@ -58,7 +58,19 @@ if (!privateBind(bind))
   throw new Error('HOSTBOARD_BIND must be loopback, a private LAN address, or a VPN address');
 if (!Number.isInteger(port) || port < 1024 || port > 65535)
   throw new Error('PORT must be between 1024 and 65535');
-const server = app.listen(port, bind, () =>
-  console.log(`Hostboard listening on ${bind}:${port}; ${agents.length} hosts configured`),
+// Same-host proxies can use localhost while browsers on the LAN use the
+// configured private address. Never bind all interfaces to enable both.
+const addresses = bind === '127.0.0.1' || bind === '::1' ? [bind] : [bind, '127.0.0.1'];
+const servers = addresses.map((address) =>
+  app.listen(port, address, () =>
+    console.log(`Hostboard listening on ${address}:${port}; ${agents.length} hosts configured`),
+  ),
 );
-process.on('SIGTERM', () => server.close(() => process.exit(0)));
+process.on('SIGTERM', () => {
+  let remaining = servers.length;
+  for (const server of servers) {
+    server.close(() => {
+      if (--remaining === 0) process.exit(0);
+    });
+  }
+});
