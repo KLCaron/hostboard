@@ -1,3 +1,5 @@
+import { DIAGNOSTICS, sensorGroup, metricName, activeAlert, resolvedAlert } from './investigation.js';
+import type { Metric, Diagnostic, AlertHistory, MetricHistory, Window } from '../src/investigation-types.js';
 import type { HostConfig } from './config.js';
 import type { Host, History, Range, Point, Container } from '../src/types.js';
 // These contexts and units were verified against live Agent responses. v1 is used
@@ -14,6 +16,8 @@ export const CONTEXTS = [
   'docker.container_health_status',
   'cgroup.cpu',
   'cgroup.mem_usage',
+  'cgroup.io',
+  'cgroup.net_net',
   'system.hw.sensor.temperature.input',
 ] as const;
 export const RANGES: Record<Range, number> = { '15m': 900, '1h': 3600, '6h': 21600, '24h': 86400 };
@@ -23,6 +27,7 @@ type Chart = {
   family: string;
   units: string;
   chart_labels: Record<string, string>;
+  dimensions?: Record<string, unknown>;
 };
 type NodeInfo = {
   mg: string;
@@ -43,7 +48,7 @@ type Meta = {
 export type Table = {
   result: { labels: string[]; data: (number | null)[][] };
   view?: { dimensions?: { ids: string[] }; update_every?: number };
-  db?: { last_entry: number };
+  db?: { first_entry?: number; last_entry: number };
   summary?: { nodes?: { mg: string }[] };
 };
 type Sample = { time: number; values: Record<string, number | null> };
@@ -138,6 +143,21 @@ export class Agent {
   private histories = new Map<Range, { value: History; time: number }>();
   private historyPending = new Map<Range, Promise<History>>();
   constructor(public config: HostConfig) {}
+  private detailsCache = new Map<string, { value: unknown; time: number }>();
+  private detailsPending = new Map<string, Promise<any>>();
+  private async cached<T>(key: string, task: () => Promise<T>): Promise<T> {
+    const cache = this.detailsCache.get(key);
+    if (cache && Date.now() - cache.time < 25000) return cache.value as T;
+    if (this.detailsPending.has(key)) return this.detailsPending.get(key)!;
+    const pending = task().then(value => {
+      // Bound memory even when users explore many custom windows.
+      if (this.detailsCache.size >= 64) this.detailsCache.delete(this.detailsCache.keys().next().value!);
+      this.detailsCache.set(key, { value, time: Date.now() });
+      return value;
+    }).finally(() => this.detailsPending.delete(key));
+    this.detailsPending.set(key, pending);
+    return pending;
+  }
   private async request(path: string, params: Record<string, string> = {}) {
     const url = new URL(path, this.config.url);
     Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
@@ -173,7 +193,7 @@ export class Agent {
     };
     return this.metadata;
   }
-  private async data(meta: Meta, context: string, seconds: number, points: number): Promise<Table> {
+  private async data(meta: Meta, context: string, seconds: number, points: number, extra: Record<string, string> = {}): Promise<Table> {
     const data = await this.request('/api/v3/data', {
       nodes: meta.node.mg,
       contexts: context,
@@ -183,6 +203,7 @@ export class Agent {
       group_by: 'instance,dimension',
       options: 'jsonwrap',
       timeout: '5000',
+      ...extra,
     });
     if (data.summary?.nodes?.length !== 1 || data.summary.nodes[0].mg !== meta.node.mg)
       throw new Error('Agent data did not match the configured node');
@@ -277,6 +298,8 @@ export class Agent {
       }
       if (chart.context === 'system.hw.sensor.temperature.input')
         host.sensors.push({
+          id: chart.id,
+          group: sensorGroup(labels),
           name: `${labels.chip_id || chart.family} · ${labels.label && labels.label !== '[none]' ? labels.label : labels.feature || 'temperature'}`,
           value: v.input ?? null,
         });
@@ -305,6 +328,8 @@ export class Agent {
         health: null,
         cpu: null,
         memory: null,
+        network: { received: null, sent: null },
+        io: { read: null, write: null },
       });
     }
     for (const chart of Object.values(meta.charts)) {
@@ -314,6 +339,13 @@ export class Agent {
       const v = values(chart.context, chart.id);
       if (chart.context === 'cgroup.cpu') container.cpu = cpu(v);
       if (chart.context === 'cgroup.mem_usage') container.memory = v.ram ?? null;
+      if (chart.context === 'cgroup.io') container.io = { read: v.read ?? null, write: v.write == null ? null : Math.abs(v.write) };
+      if (chart.context === 'cgroup.net_net') {
+        for (const [key, dimension] of [['received', 'received'], ['sent', 'sent']] as const) {
+          const n = v[dimension];
+          if (n != null) container.network[key] = (container.network[key] ?? 0) + Math.abs(n);
+        }
+      }
       if (chart.context === 'docker.container_health_status')
         container.health = Object.entries(v).find(([, v]) => v !== null && v > 0.5)?.[0] || null;
     }
@@ -396,7 +428,15 @@ export class Agent {
         },
       ),
     );
+    let cpuPeaks: { time: number; value: number | null }[] = [];
+    if (meta.contexts['system.cpu']) {
+      try {
+        const table = await this.data(meta, 'system.cpu', RANGES[range], 180, { dimensions: 'idle', time_group: 'min' });
+        cpuPeaks = [...parseTable(table).values()].flat().map(s => ({ time: s.time, value: s.values.idle == null ? null : 100 - s.values.idle }));
+      } catch { errors.push('CPU peak history unavailable'); }
+    }
     return {
+      cpuPeaks,
       hostId: this.config.id,
       range,
       points: [...points.values()].sort((a, b) => a.time - b.time),
@@ -404,4 +444,107 @@ export class Agent {
       errors,
     };
   }
+  async catalog(): Promise<Metric[]> {
+    const meta = await this.meta();
+    return Object.values(meta.charts).map(c => ({
+      id: c.id, context: c.context, name: metricName(c), units: c.units,
+      group: c.context === 'system.hw.sensor.temperature.input' ? sensorGroup(c.chart_labels || {}) : DIAGNOSTICS[c.context]?.[0] || (c.context.startsWith('cgroup.') ? 'Containers' : 'Other'),
+      description: DIAGNOSTICS[c.context]?.[1] || (c.context.startsWith('cgroup.') ? 'Container resources reported by Netdata. CPU: 100% equals one core.' : c.context),
+    }));
+  }
+  async diagnostics(): Promise<Diagnostic[]> {
+    return this.cached('diagnostics', async () => {
+      const meta = await this.meta(), catalog = await this.catalog();
+      const metrics: Diagnostic[] = catalog.filter(c => DIAGNOSTICS[c.context]).map(c => ({ ...c, values: {} }));
+      await Promise.all(Object.keys(DIAGNOSTICS).map(async context => {
+        if (!meta.contexts[context]) return;
+        try {
+          const samples = parseTable(await this.data(meta, context, 30, 3));
+          for (const m of metrics.filter(m => m.context === context)) m.values = latest(samples.get(m.id), Date.now() / 1000)?.values || {};
+        } catch { /* Empty readings explicitly indicate unavailable data. */ }
+      }));
+      return metrics;
+    });
+  }
+  async alertDetails(): Promise<AlertHistory> {
+    return this.cached('alerts', async () => {
+      const meta = await this.meta(), errors: string[] = [];
+      const charts = Object.fromEntries((await this.catalog()).map(c => [c.id, c]));
+      const [current, history] = await Promise.allSettled([
+        this.request('/api/v3/alerts', { nodes: meta.node.mg, options: 'instances,values' }),
+        this.request('/api/v3/alert_transitions', { nodes: meta.node.mg, after: '-604800', last: '200' }),
+      ]);
+      let active: import('../src/investigation-types.js').AlertDetail[] = [], resolved: typeof active = [];
+      if (current.status === 'fulfilled') {
+        const data = current.value;
+        const ni = data.nodes?.find((n: any) => n.mg === meta.node.mg)?.ni;
+        if (ni === undefined) errors.push('Alert node identity unavailable');
+        else active = (data.alert_instances || []).filter((a: any) => a.ni === ni && ['WARNING', 'CRITICAL'].includes(a.st)).map((a: any) => activeAlert(a, charts));
+      } else errors.push('Current alert details unavailable');
+      if (history.status === 'fulfilled') resolved = (history.value.transitions || [])
+        .filter((t: any) => t.machine_guid === meta.node.mg)
+        .map((t: any) => resolvedAlert(t, charts)).filter(Boolean).slice(0, 50);
+      else errors.push('Alert transition history unavailable');
+      // Active start is the last state-change timestamp unless retained transitions
+      // establish an uninterrupted WARNING/CRITICAL incident across severity changes.
+      if (history.status === 'fulfilled') for (const a of active) {
+        const transitions = (history.value.transitions || []).filter((t: any) => t.machine_guid === meta.node.mg && t.instance === a.chart && t.alert === a.name).sort((a: any,b: any) => b.when-a.when);
+        for (const t of transitions) {
+          if (!['WARNING','CRITICAL'].includes(t.new?.status)) break;
+          a.startedAt = t.when;
+          if (!['WARNING','CRITICAL'].includes(t.old?.status)) break;
+        }
+      }
+      const configs = [...new Set([...active, ...resolved].map(a => a.config).filter(Boolean))].slice(0, 20);
+      await Promise.all(configs.map(async config => {
+        try {
+          const c: any = await this.cached('config:' + config, () => this.request('/api/v3/alert_config', { config: config! }));
+          for (const a of [...active, ...resolved].filter(a => a.config === config)) {
+            a.warning = c.status?.warn || null; a.critical = c.status?.crit || null;
+          }
+        } catch { errors.push('Some alert threshold expressions unavailable'); }
+      }));
+      return { active, resolved, errors: [...new Set(errors)], fetchedAt: new Date().toISOString() };
+    });
+  }
+  async metricHistory(id: string, window: Window): Promise<MetricHistory> {
+    return this.cached(`metric:${id}:${window.after}:${window.before}`, async () => {
+      const metric = (await this.catalog()).find(c => c.id === id);
+      if (!metric) throw new Error('Unknown metric');
+      const meta = await this.meta(), points = new Map<number, { time: number; [key: string]: number | null }>();
+      const errors: string[] = [], dimensions = new Set<string>();
+      let first: number | null = null, last: number | null = null, interval: number | null = null;
+      await Promise.all(['average', 'min', 'max'].map(async aggregation => {
+        try {
+          const table = await this.data(meta, metric.context, 0, 240, {
+            after: String(window.after), before: String(window.before), instances: id,
+            time_group: aggregation,
+            ...(metric.context === 'system.cpu' ? { dimensions: 'idle' } : {}),
+          });
+          first = finite(table.db?.first_entry); last = finite(table.db?.last_entry); interval = finite(table.view?.update_every);
+          const samples = parseTable(table).get(id) || [];
+          for (const sample of samples) {
+            if (!points.has(sample.time)) points.set(sample.time, { time: sample.time });
+            const p = points.get(sample.time)!;
+            for (const [dimension, value] of Object.entries(sample.values)) {
+              const busy = metric.context === 'system.cpu' && dimension === 'idle';
+              const name = busy ? 'busy' : dimension;
+              dimensions.add(name);
+              const agg = busy && aggregation !== 'average' ? (aggregation === 'min' ? 'max' : 'min') : aggregation;
+              p[`${name}:${agg}`] = value === null ? null : busy ? 100 - value : ['system.net','system.io','disk.io','cgroup.io','cgroup.net_net','mem.swapio'].includes(metric.context) ? Math.abs(value) : value;
+            }
+          }
+        } catch { errors.push(`${aggregation} history unavailable`); }
+      }));
+      const ds = [...dimensions];
+      for (const p of points.values()) for (const d of ds) for (const a of ['average','min','max']) p[`${d}:${a}`] ??= null;
+      // Signed outbound series have negative minima; order their magnitudes.
+      for (const p of points.values()) for (const d of ds) {
+        const lo = p[`${d}:min`], hi = p[`${d}:max`];
+        if (lo !== null && hi !== null && lo > hi) [p[`${d}:min`], p[`${d}:max`]] = [hi, lo];
+      }
+      return { metric, window, dimensions: ds, points: [...points.values()].sort((a,b) => a.time-b.time), retention: { first, last, interval }, errors, fetchedAt: new Date().toISOString() };
+    });
+  }
+
 }

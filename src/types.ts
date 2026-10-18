@@ -16,8 +16,12 @@ export interface Container {
   health: string | null;
   cpu: number | null;
   memory: number | null;
+  network: { received: number | null; sent: number | null };
+  io: { read: number | null; write: number | null };
 }
 export interface Sensor {
+  id: string;
+  group: string;
   name: string;
   value: number | null;
 }
@@ -72,4 +76,5 @@ export interface History {
   points: Point[];
   fetchedAt: string;
   errors: string[];
+  cpuPeaks?: { time: number; value: number | null }[];
 }

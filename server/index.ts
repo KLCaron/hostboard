@@ -1,4 +1,5 @@
 import express from 'express';
+import { validateWindow } from './investigation.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadConfig, privateBind } from './config.js';
@@ -46,6 +47,30 @@ app.get('/api/hosts/:id/history', async (req, res) => {
     res.status(502).json({ error: 'Agent history is unavailable' });
   }
 });
+// Investigation requests accept exact catalog IDs, never caller-provided Agent URLs.
+for (const endpoint of ['metrics', 'diagnostics', 'alerts', 'metric-history'] as const) {
+  app.get(`/api/hosts/:id/${endpoint}`, async (req, res) => {
+    const agent = agents.find(a => a.config.id === req.params.id);
+    if (!agent) { res.status(404).json({ error: 'Unknown host' }); return; }
+    let window;
+    if (endpoint === 'metric-history') {
+      if (typeof req.query.chart !== 'string' || req.query.chart.length > 512) {
+        res.status(400).json({ error: 'Choose a metric chart' }); return;
+      }
+      try { window = validateWindow(req.query.after, req.query.before); }
+      catch (error) { res.status(400).json({ error: (error as Error).message }); return; }
+    }
+    try {
+      if (endpoint === 'metrics') res.json(await agent.catalog());
+      else if (endpoint === 'diagnostics') res.json(await agent.diagnostics());
+      else if (endpoint === 'alerts') res.json(await agent.alertDetails());
+      else {
+        if (!(await agent.catalog()).some(c => c.id === req.query.chart)) { res.status(404).json({ error: 'Metric is no longer available on this host' }); return; }
+        res.json(await agent.metricHistory(req.query.chart as string, window!));
+      }
+    } catch { res.status(502).json({ error: 'Agent investigation data unavailable. Check the host connection and retry.' }); }
+  });
+}
 app.use('/api', (_req, res) => res.status(404).json({ error: 'Unknown endpoint' }));
 const client = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../client');
 app.use(express.static(client, { maxAge: '1h', index: false }));
