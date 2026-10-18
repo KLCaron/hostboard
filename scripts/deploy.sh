@@ -33,12 +33,21 @@ chmod 600 "$root/.env"
 chmod 644 "$root/config/hosts.json"
 chmod 600 "$root/config/checks.json"
 install -d -m 700 "$root/data" "$root/private"
+# This optional helper owns the shared-root topology. Reject alternate mounts
+# rather than producing a misleading checkpoint; use manage.sh for configurable storage.
+if docker inspect hostboard-hostboard-1 >/dev/null 2>&1; then
+  docker inspect hostboard-hostboard-1 | python3 -c 'import json,sys; mounts={m["Destination"]:m["Source"] for m in json.load(sys.stdin)[0]["Mounts"]}; root="/srv/stacks/hostboard"; assert all(mounts.get("/app/"+n)==root+"/"+n for n in ("private","data")), "SSH helper requires default shared mounts; use paired recovery for alternate storage"'
+fi
+checkpoint="$root/backups/pre-$release"
+mkdir -m 700 -p "$checkpoint"
+cp -a "$root/.env" "$root/private" "$root/config" "$checkpoint/"
+if [ -L "$root/current" ]; then readlink "$root/current" > "$checkpoint/release.txt"; fi
 # Shared bind mounts preserve SQLite and credentials across releases and rollbacks.
 ln -s "$root/data" "$root/releases/$release/data"
 ln -s "$root/private" "$root/releases/$release/private"
 ln -s "$root/config/checks.json" "$root/releases/$release/config/checks.json"
 if [ -f "$root/data/monitor.sqlite" ]; then
-  python3 - "$root/data/monitor.sqlite" "$root/data/monitor.before-$release.sqlite" <<'PY'
+  python3 - "$root/data/monitor.sqlite" "$checkpoint/monitor.sqlite" <<'PY'
 import sqlite3, sys
 with sqlite3.connect(sys.argv[1]) as source, sqlite3.connect(sys.argv[2]) as destination:
     source.backup(destination)
@@ -65,6 +74,26 @@ done
 if [ -f "$root/previous-release" ]; then
   previous=$(cat "$root/previous-release")
   if [ -d "$previous" ]; then
+    # New schema may be unreadable by the old image. Stop only Hostboard and
+    # restore its paired checkpoint before asking the previous code to start.
+    docker compose -f deploy/compose.host.yaml --project-directory . --env-file "$root/.env" stop hostboard
+    if [ -f "$checkpoint/monitor.sqlite" ]; then
+      python3 - "$root/data/monitor.sqlite" "$checkpoint/monitor.sqlite" "$root/data/monitor.failed-$release.sqlite" <<'PYRESTORE'
+import sqlite3,sys,os,shutil
+with sqlite3.connect(sys.argv[1]) as src,sqlite3.connect(sys.argv[3]) as dst: src.backup(dst)
+with sqlite3.connect(sys.argv[2]) as saved:
+    assert saved.execute('PRAGMA integrity_check').fetchone()[0]=='ok'
+for suffix in ('-wal','-shm'):
+    try: os.unlink(sys.argv[1]+suffix)
+    except FileNotFoundError: pass
+shutil.copyfile(sys.argv[2],sys.argv[1]+'.restore')
+os.chmod(sys.argv[1]+'.restore',0o600)
+os.replace(sys.argv[1]+'.restore',sys.argv[1])
+PYRESTORE
+      cp -a "$checkpoint/.env" "$root/.env"
+      cp -a "$checkpoint/config/." "$root/config/"
+      cp -a "$checkpoint/private/." "$root/private/"
+    fi
     cd "$previous"
     if [ -f deploy/compose.host.yaml ]; then
       HOSTBOARD_TAG=$(basename "$previous") docker compose -f deploy/compose.host.yaml --project-directory . --env-file "$root/.env" up -d --no-build

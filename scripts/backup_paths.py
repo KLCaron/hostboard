@@ -94,6 +94,8 @@ def main():
             resolved=subprocess.check_output(['docker','image','inspect','--format','{{.Id}}',reference],text=True).strip()
             if resolved!=image_id: raise ValueError('Saved image tag no longer matches checkpoint; recover the preserved image')
         selected = mounts(checkpoint/'.env')
+        if any(checkpoint==source or source in checkpoint.parents or checkpoint in source.parents for source in selected.values()):
+            raise ValueError('Checkpoint must be outside restored mounts')
         if command == 'restore':
             for name in ('private','config'):
                 # The validated tree replaces the selected installation's files, including removals.

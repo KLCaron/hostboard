@@ -422,3 +422,81 @@ test("HB-003 real 100-check mixed slow/fast load has no overlapping work and bou
     m.db.close();
   }
 });
+
+test("adversarial: imported remote incident IDs are isolated across target generations", () => {
+  const m = new Monitor(config(), ":memory:", null, 1000);
+  const remote = {
+    id: 1,
+    name: "Old / independent",
+    startedAt: 900,
+    detectedAt: 990,
+    endedAt: null,
+    reason: "Unavailable",
+    lastReason: "Unavailable",
+    notifications: [],
+  };
+  m.record(base, { ...good, watchdogHistory: [remote] }, 1000);
+  const replacement = { ...base, url: "http://127.0.0.1/new-watchdog" };
+  m.configure(config([replacement]), 1010);
+  assert.equal(m.view(1010).activeIncidents?.length, 0);
+  m.record(
+    replacement,
+    {
+      ...good,
+      watchdogHistory: [
+        {
+          ...remote,
+          name: "Replacement / independent",
+          startedAt: 1010,
+          detectedAt: 1020,
+        },
+      ],
+    },
+    1020,
+  );
+  const view = m.view(1020);
+  assert.equal(view.incidents.length, 2);
+  assert.equal(view.activeIncidents?.length, 1);
+  assert.equal(view.activeIncidents?.[0].name, "Replacement / independent");
+  assert.equal(view.incidents[1].resolution, "Check configuration changed");
+  m.db.close();
+});
+
+test("adversarial: archive cancels an in-flight notification and cannot turn retirement into recovery", async () => {
+  let cancelled = false;
+  const c = { ...base, failureThreshold: 1 };
+  const m = new Monitor(
+    config([c]),
+    ":memory:",
+    {
+      provider: "controlled",
+      send: async (_message, signal) => {
+        await new Promise<void>((_resolve, reject) =>
+          signal!.addEventListener(
+            "abort",
+            () => {
+              cancelled = true;
+              reject(Error("Cancelled"));
+            },
+            { once: true },
+          ),
+        );
+      },
+    },
+    1000,
+  );
+  m.record(c, bad, 1000);
+  const sending = m.dispatch(1000);
+  m.configure(config([c]), 1001, new Set([c.id]), new Set([c.id]));
+  await sending;
+  assert(cancelled);
+  assert.equal(m.view(1001).activeIncidents?.length, 0);
+  assert.equal(m.view(1001).incidents[0].notifications[0].state, "suppressed");
+  m.configure(config([c]), 1002, new Set(), new Set());
+  m.record(c, good, 1003);
+  assert.match(
+    m.view(1003).incidents[0].resolution!,
+    /Monitoring discontinued/,
+  );
+  m.db.close();
+});

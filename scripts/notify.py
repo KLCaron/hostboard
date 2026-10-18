@@ -9,6 +9,8 @@ import json
 import os
 from pathlib import Path
 import smtplib
+import socket
+import threading
 import sqlite3
 import ssl
 import time
@@ -86,15 +88,31 @@ class Queue:
         port = config.get('port', 587)
         if port not in (465, 587):
             raise ValueError('TLS SMTP port required')
-        client = smtplib.SMTP_SSL(config['host'], port, timeout=12, context=context) if port == 465 else smtplib.SMTP(config['host'], port, timeout=12)
-        with client:
-            if port == 587:
-                client.ehlo()
-                client.starttls(context=context)
-                client.ehlo()
-            client.login(config['username'], config['password'])
-            if client.send_message(message):
-                raise ValueError('Recipient rejected')
+        client = smtplib.SMTP_SSL(timeout=12, context=context, local_hostname=socket.gethostname()) if port == 465 else smtplib.SMTP(timeout=12, local_hostname=socket.gethostname())
+        expired = threading.Event()
+        def cancel():
+            expired.set()
+            try:
+                if client.sock: client.sock.shutdown(socket.SHUT_RDWR)
+            except OSError: pass
+            client.close()
+        deadline = threading.Timer(30, cancel)
+        deadline.daemon = True
+        deadline.start()
+        try:
+            client.connect(config['host'], port)
+            if expired.is_set(): raise TimeoutError('SMTP deadline exceeded')
+            with client:
+                if port == 587:
+                    client.ehlo()
+                    client.starttls(context=context)
+                    client.ehlo()
+                client.login(config['username'], config['password'])
+                if client.send_message(message):
+                    raise ValueError('Recipient rejected')
+        finally:
+            deadline.cancel()
+            client.close()
 
     def flush(self, now=None, limit=3, only=None):
         now = time.time() if now is None else now

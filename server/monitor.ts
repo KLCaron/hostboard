@@ -152,12 +152,11 @@ export class Monitor {
           )
           .run(check.id, generation, fingerprint, now);
         if (old && changed) {
-          if (old.active)
-            this.db
-              .prepare(
-                "UPDATE incidents SET endedAt=?,resolution='Check configuration changed',monitoringGap=1 WHERE checkId=? AND endedAt IS NULL",
-              )
-              .run(now, check.id);
+          this.db
+            .prepare(
+              "UPDATE incidents SET endedAt=?,resolution='Check configuration changed',monitoringGap=1 WHERE checkId=? AND endedAt IS NULL",
+            )
+            .run(now, check.id);
           this.db
             .prepare(
               "UPDATE checks SET checked=NULL,ok=NULL,failures=0,firstFailure=NULL,active=NULL WHERE id=?",

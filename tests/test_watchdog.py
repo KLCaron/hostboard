@@ -11,6 +11,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 from notify import Queue
@@ -140,6 +141,40 @@ class WatchdogTests(unittest.TestCase):
                 self.assertEqual([e['event'] for e in events],['outage','recovery'])
                 self.assertEqual(events[0]['incident'],events[1]['incident'])
             queue.db.close()
+
+    def test_smtp_absolute_deadline_closes_blocked_socket_and_other_keys_progress(self):
+        import threading
+        with tempfile.TemporaryDirectory() as d:
+            config=Path(d)/'smtp.json'
+            config.write_text(json.dumps(dict(host='fixture',port=587,username='fixture',password='fixture-only',to=['recipient@example.test'],**{'from':'sender@example.test'})))
+            closed=threading.Event()
+            class Socket:
+                def shutdown(self,how): closed.set()
+            class Client:
+                def __init__(self,**kwargs): self.sock=Socket()
+                def connect(self,*args): pass
+                def __enter__(self): return self
+                def __exit__(self,*args): pass
+                def ehlo(self): pass
+                def starttls(self,**kwargs): pass
+                def login(self,*args): pass
+                def send_message(self,*args):
+                    if not closed.wait(2): raise AssertionError('Deadline did not interrupt transport')
+                    raise OSError('controlled private transport error')
+                def close(self): closed.set()
+            queue=Queue(str(Path(d)/'queue.sqlite'),str(config))
+            sent=[]
+            def sender(row):
+                if row['key']=='bad': queue.smtp_send(row)
+                else: sent.append(row['key'])
+            queue.sender=sender
+            queue.transition('bad','Bad',True,'failure',1000,cooldown=0)
+            queue.transition('good','Good',True,'failure',1000,cooldown=0)
+            real_timer=threading.Timer
+            with mock.patch('notify.smtplib.SMTP',Client),mock.patch('notify.threading.Timer',lambda delay,fn:real_timer(.02,fn)):
+                queue.flush(1000,limit=3)
+            self.assertTrue(closed.is_set());self.assertEqual(sent,['good'])
+            self.assertEqual(queue.summary(),{'delivered':1,'failed':1});queue.db.close()
 
     def test_native_netdata_critical_recovery_deduplication(self):
         with tempfile.TemporaryDirectory() as d:
