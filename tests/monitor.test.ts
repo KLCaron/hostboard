@@ -166,3 +166,26 @@ test('delivery identities survive retry/restart and differ between independent d
   m=new Monitor(config,path.join(dir,'two.sqlite'),delivery,1040);m.record(config.checks[0],bad,1040);await m.dispatch(1040);m.db.close();
   assert(attempted[0].messageKey);assert.equal(attempted[0].messageKey,attempted[1].messageKey);assert.notEqual(attempted[1].messageKey,attempted[2].messageKey);
 });
+
+test('navigation read models include old active incidents and last success without changing evaluation',()=>{
+  const c=CheckSchema.parse({...check,failureThreshold:1});
+  const m=new Monitor(ChecksSchema.parse({checks:[c]}),':memory:',null,1000);
+  m.record(c,good,1000);m.record(c,bad,1010);
+  for(let i=0;i<105;i++)m.db.prepare('INSERT INTO incidents(checkId,name,hostId,severity,startedAt,detectedAt,endedAt,reason,lastReason,resolution) VALUES(?,?,?,?,?,?,?,?,?,?)').run('old','Old','host','warning',1020+i,1020+i,1030+i,'Failure','Recovered','Reachability restored');
+  const view=m.view(1200);
+  assert.equal(view.incidents.length,100);assert.equal(view.incidents.some(i=>i.id===1),false);
+  assert.equal(view.activeIncidents?.length,1);assert.equal(view.activeIncidents?.[0].id,1);
+  assert.equal(view.checks[0].lastSuccessfulAt,1000);assert.equal(view.checks[0].state,'unknown');
+  assert.equal(m.view(1200,2).incidents[0].id,1);m.db.close();
+});
+
+test('service grouping metadata preserves observations and active incident identities',t=>{
+  const dir=mkdtempSync(path.join(tmpdir(),'hostboard-group-'));t.after(()=>rmSync(dir,{recursive:true,force:true}));
+  const file=path.join(dir,'monitor.sqlite');const c=CheckSchema.parse({...check,failureThreshold:1});
+  let m=new Monitor(ChecksSchema.parse({checks:[c]}),file,null,1000);
+  m.record(c,good,1000);m.record(c,bad,1010);m.db.close();
+  m=new Monitor(ChecksSchema.parse({checks:[{...c,group:'Infrastructure'}]}),file,null,1020);
+  assert.equal(m.view(1020).checks[0].group,'Infrastructure');
+  assert.equal(m.view(1020).checks[0].lastSuccessfulAt,1000);
+  assert.equal(m.view(1020).activeIncidents?.[0].id,1);m.db.close();
+});

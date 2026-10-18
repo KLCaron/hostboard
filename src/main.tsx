@@ -1,6 +1,5 @@
-import { Alerts, Containers, HostDiagnostics, HostExplorer, Services, InvestigationDialog, type InvestigationTarget } from './Investigation';
+import { Containers, HostDiagnostics, HostExplorer, Services, InvestigationDialog, type InvestigationTarget } from './Investigation';
 import { readPreference, savePreference } from './preferences';
-import type { AlertHistory } from './investigation-types';
 import React, { useEffect, useId, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
@@ -8,7 +7,6 @@ import {
   ArrowUpRight,
   Bell,
   Box,
-  Check,
   ChevronDown,
   ChevronRight,
   CircleHelp,
@@ -23,6 +21,8 @@ import {
   Server,
   Thermometer,
   X,
+  Settings as SettingsIcon,
+  Activity,
 } from 'lucide-react';
 import {
   Area,
@@ -33,7 +33,10 @@ import {
 } from 'recharts';
 import type { Fleet, History, Host, Point, Range } from './types';
 import './style.css';
-import { useMonitoring, RecentIncidents, Monitoring } from './Monitoring';
+import { useMonitoring, HealthSummary, ServiceChecks, Settings } from './Monitoring';
+import { Issues } from './Issues';
+import { pages, resolveNavigation, type Page } from './navigation';
+import { activeIssueCount } from './issues';
 const ranges: Range[] = ['15m', '1h', '6h', '24h'];
 const rangeLabels: Record<Range, string> = {
   '15m': '15 min',
@@ -378,7 +381,7 @@ function App() {
   const [fleet, setFleet] = useState<Fleet>(),
     [histories, setHistories] = useState<Record<string, History>>({}),
     [range, setRange] = useState<Range>(() => readPreference('range','1h',v=>ranges.includes(v as Range))),
-    [page, setPage] = useState<'overview' | 'servers' | 'alerts' | 'incidents'>('overview'),
+    [page, setPage] = useState<Page>(()=>resolveNavigation(location.hash,location.pathname).page),
     [expanded, setExpanded] = useState<string | null>(null),
     [error, setError] = useState<string | null>(null),
     [historyError, setHistoryError] = useState<string | null>(null),
@@ -391,8 +394,14 @@ function App() {
   const [target,setTarget] = useState<InvestigationTarget | null>(null);
   useEffect(()=>{ savePreference('range',range); },[range]);
   useEffect(()=>{
-    const link=()=>{if (/^#incident=\d+$/.test(location.hash)) {setPage('incidents'); return;} const match=location.hash.match(/^#host=([a-zA-Z0-9_-]+)$/);if(match){setPage('servers');setExpanded(match[1]);setQuery('');}};
-    link();window.addEventListener('hashchange',link);return()=>window.removeEventListener('hashchange',link);
+    const link=()=>{
+      const route=resolveNavigation(location.hash,location.pathname);
+      if(route.canonical){history.replaceState(null,'',`/${route.canonical}`);window.dispatchEvent(new HashChangeEvent('hashchange'));}
+      else if(location.pathname!=='/') history.replaceState(null,'',`/${location.hash||`#${route.page}`}`);
+      setPage(route.page);setExpanded(route.host??null);setQuery('');setTarget(null);
+    };
+    link();window.addEventListener('hashchange',link);window.addEventListener('popstate',link);
+    return()=>{window.removeEventListener('hashchange',link);window.removeEventListener('popstate',link);};
   },[]);
   useEffect(() => {
     let cancelled = false,
@@ -490,10 +499,7 @@ function App() {
         : h,
     ),
     online = hosts.filter((h) => h.status === 'online');
-  const alerts = hosts.flatMap((h) =>
-      (h.alerts || []).map((a) => ({ ...a, hostId:h.id, host: h.name, fresh: h.status === 'online' })),
-    ),
-    alertCount = alerts.reduce((n, a) => n + a.count, 0);
+  const issueCount = activeIssueCount(hosts,monitoring.data);
   const cpuHosts = online.filter((h) => h.cpu !== null && h.cores !== null),
     cores = cpuHosts.reduce((n, h) => n + h.cores!, 0),
     cpuAvg = cores ? cpuHosts.reduce((n, h) => n + h.cpu! * h.cores!, 0) / cores : null;
@@ -506,6 +512,7 @@ function App() {
   );
   const age = fleet ? Math.max(0, Math.floor((now - Date.parse(fleet.generatedAt)) / 1000)) : null;
   const navigate = (value: typeof page) => {
+    location.hash = value;
     setPage(value);
     setQuery('');
     setExpanded(null);
@@ -523,28 +530,11 @@ function App() {
         </a>
         <div className="workspace-label">MONITORING</div>
         <nav aria-label="Main navigation">
-          <button
-            className={page === 'overview' ? 'selected' : ''}
-            onClick={() => navigate('overview')}
-          >
-            <LayoutDashboard size={18} />
-            Overview
-          </button>
-          <button
-            className={page === 'servers' ? 'selected' : ''}
-            onClick={() => navigate('servers')}
-          >
-            <Server size={18} />
-            Servers<span className="nav-count">{hosts.length || '—'}</span>
-          </button>
-          <button
-            className={page === 'alerts' ? 'selected' : ''}
-            onClick={() => navigate('alerts')}
-          >
-            <Bell size={18} />
-            Alerts{alertCount > 0 && <span className="nav-count alert-count">{alertCount}</span>}
-          </button>
-          <button className={page === 'incidents' ? 'selected' : ''} onClick={() => navigate('incidents')}><Clock3 size={18}/>Incidents</button>
+          {pages.map(value=>{
+            const Icon={overview:LayoutDashboard,servers:Server,services:Activity,issues:Bell,settings:SettingsIcon}[value];
+            const label=value[0].toUpperCase()+value.slice(1);
+            return <button key={value} aria-label={label} aria-current={page===value?'page':undefined} title={label} className={page===value?'selected':''} onClick={()=>navigate(value)}><Icon size={18}/><span className="nav-label">{label}</span>{value==='issues'&&issueCount>0&&<span className="nav-count alert-count" aria-label={`${issueCount} active issues`}>{issueCount}</span>}</button>;
+          })}
         </nav>
         <div className="sidebar-bottom">
           <button className="about-button" onClick={() => setHelp(true)}>
@@ -560,7 +550,7 @@ function App() {
             <Layers3 size={15} />
             <b>Monitoring</b>
             <ChevronRight size={13} />
-            {page === 'overview' ? 'Overview' : page === 'servers' ? 'Servers' : page === 'incidents' ? 'Incidents' : 'Alerts'}
+            {page[0].toUpperCase()+page.slice(1)}
           </span>
           <div>
             <span className={`connection-dot ${error || outdated ? 'disconnected' : ''}`} />
@@ -577,7 +567,7 @@ function App() {
           <section className="page-heading">
             <div>
               <h1>
-                {page === 'overview' ? 'Fleet overview' : page === 'servers' ? 'Servers' : page === 'incidents' ? 'Incidents' : 'Alerts'}
+                {page === 'overview' ? 'Fleet overview' : page[0].toUpperCase()+page.slice(1)}
               </h1>
             </div>
             <button
@@ -599,6 +589,7 @@ function App() {
                 : 'Waiting for a connection to the Hostboard backend.'}
             </div>
           )}
+          {page === 'overview' && <HealthSummary hosts={hosts} data={monitoring.data} error={monitoring.error}/>}
           {(page === 'overview' || page === 'servers') && (
             <section className="fleet-stats" aria-label="Fleet summary">
               <div className="stat-card">
@@ -727,68 +718,9 @@ function App() {
               )}
             </>
           )}
-          {page === 'alerts' && <Alerts hosts={hosts} onInvestigate={setTarget} />}
-          {page === 'incidents' && <Monitoring data={monitoring.data} error={monitoring.error} />}
-          {page === 'overview' && <RecentIncidents data={monitoring.data} openHistory={() => navigate('incidents')} />}
-          {page === 'overview' && <Services hosts={hosts} checks={monitoring.data?.checks} onInvestigate={setTarget} />}
-          {page === 'overview' && (
-            <section className="alerts-panel">
-              <div className="alerts-heading">
-                <span className="alerts-icon">
-                  <Bell size={19} />
-                </span>
-                <div>
-                  <h2>
-                    Active alerts <span>{alertCount}</span>
-                  </h2>
-                  <p>Warnings and critical alerts.</p>
-                </div>
-                {page === 'overview' && (
-                  <button className="text-button" onClick={() => navigate('alerts')}>
-                    View alerts
-                    <ChevronRight size={14} />
-                  </button>
-                )}
-              </div>
-              {alerts.map((a) => (
-                <button className="alert-row investigation-alert" key={`${a.host}-${a.name}`} onClick={async()=>{
-                  const host=hosts.find(h=>h.id===a.hostId)!;
-                  try {const details=await get<AlertHistory>(`/api/hosts/${host.id}/alerts`,new AbortController().signal);const alert=details.active.find(d=>d.name===a.name);if(alert)setTarget({host,alert,chart:alert.chart});else navigate('alerts');}catch{navigate('alerts');}
-                }}>
-                  <span className={`severity ${a.severity}`}>{a.severity}</span>
-                  <div>
-                    <b>{a.summary}</b>
-                    <span>
-                      {a.host} · {a.name.replaceAll('_', ' ')}
-                      {a.count > 1 ? ` · ${a.count} instances` : ''}
-                      {!a.fresh ? ' · last known state' : ''}
-                    </span>
-                  </div>
-                  <ChevronRight size={15} />
-                </button>
-              ))}
-              {!alerts.length && (
-                <div className="all-clear">
-                  <Check size={19} />
-                  <span>
-                    {hosts.length && hosts.every((h) => h.status === 'online' && h.alerts !== null)
-                      ? 'No active warnings or critical alerts.'
-                      : 'Alert status is not yet available for all hosts.'}
-                  </span>
-                </div>
-              )}
-              {hosts.some((h) => h.alerts === null || h.status !== 'online') && (
-                <div className="notice">
-                  Alert coverage is incomplete.{' '}
-                  {hosts
-                    .filter((h) => h.alerts === null || h.status !== 'online')
-                    .map((h) => h.name)
-                    .join(', ')}{' '}
-                  cannot confirm current alert state.
-                </div>
-              )}
-            </section>
-          )}
+          {page === 'services' && <><ServiceChecks data={monitoring.data} error={monitoring.error}/><Services hosts={hosts} checks={monitoring.data?.checks} onInvestigate={setTarget}/></>}
+          {page === 'issues' && <Issues hosts={hosts} data={monitoring.data} error={monitoring.error} onInvestigate={setTarget}/>}
+          {page === 'settings' && <Settings data={monitoring.data} error={monitoring.error}/>}
           <footer>
             <span>
               <span className="footer-dot" />

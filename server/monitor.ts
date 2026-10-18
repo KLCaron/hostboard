@@ -41,7 +41,9 @@ export class Monitor {
       else if (row.active) this.db.prepare('UPDATE incidents SET monitoringGap=1 WHERE id=?').run(row.active);
     }
     for (const check of config.checks) {
-      const fingerprint = createHash('sha256').update(JSON.stringify(check)).digest('hex');
+      // Presentation metadata must not retire incidents or discard observations.
+      const { group: _group, ...evaluation } = check;
+      const fingerprint = createHash('sha256').update(JSON.stringify(evaluation)).digest('hex');
       const previous = this.state(check.id);
       if (previous && previous.fingerprint !== fingerprint) { this.retire(previous, now); this.db.prepare('DELETE FROM samples WHERE checkId=?').run(check.id); }
       this.db.prepare('INSERT OR IGNORE INTO checks(id,fingerprint) VALUES (?,?)').run(check.id, fingerprint);
@@ -169,15 +171,18 @@ export class Monitor {
         const valid = bucket.filter(v => v.ms !== null);
         trend.push({ time: start, responseMs: valid.length ? valid.reduce((n, v) => n + v.ms!, 0) / valid.length : null, ok: bucket.length ? bucket.some(v => v.ok === 0) ? false : bucket.every(v => v.ok === 1) ? true : null : null });
       }
-      return { id: c.id, name: c.name, hostId: c.hostId, container: c.container, type: c.type,
+      return { id: c.id, name: c.name, hostId: c.hostId, container: c.container, type: c.type, group: c.group,
+        lastSuccessfulAt: (this.db.prepare('SELECT MAX(time) AS time FROM samples WHERE checkId=? AND ok=1').get(c.id) as { time: number | null }).time,
         state: stale || s.ok === null ? 'unknown' : s.ok === 1 ? 'up' : s.active ? 'down' : 'pending',
         checkedAt: s.checked, responseMs: stale ? null : s.ms, reason: stale ? 'Monitoring unavailable; no recent observation' : s.reason,
         failures: s.failures, failureThreshold: c.failureThreshold, intervalSeconds: c.intervalSeconds, severity: c.severity,
         notify: c.notify && !(this.config.minimumSeverity === 'critical' && c.severity !== 'critical'), activeIncident: s.active,
         summary: { windowSeconds: window, observedSeconds: observed, upSeconds: up, downSeconds: down, unknownSeconds: window - observed, availability: observed >= Math.max(3600, window * .8) ? 100 * up / observed : null, since: samples[0]?.time ?? null }, trend };
     });
-    const incidents = (this.db.prepare('SELECT * FROM incidents WHERE id<? ORDER BY id DESC LIMIT 100').all(before) as unknown as IncidentView[]).map(i => ({ ...i, source: this.db.prepare('SELECT incident FROM external_incidents WHERE incident=?').get(i.id) ? 'watchdog' as const : undefined, monitoringGap: Boolean(i.monitoringGap), notifications: this.db.prepare('SELECT id,event,REPLACE(state,\'external-\',\'\') AS state,attempts,lastAttempt,deliveredAt,error FROM notifications WHERE incident=? ORDER BY id').all(i.id) as unknown as NotificationView[] }));
+    const incidentViews = (rows: IncidentView[]) => rows.map(i => ({ ...i, source: this.db.prepare('SELECT incident FROM external_incidents WHERE incident=?').get(i.id) ? 'watchdog' as const : undefined, monitoringGap: Boolean(i.monitoringGap), notifications: this.db.prepare("SELECT id,event,REPLACE(state,'external-','') AS state,attempts,lastAttempt,deliveredAt,error FROM notifications WHERE incident=? ORDER BY id").all(i.id) as unknown as NotificationView[] }));
+    const incidents = incidentViews(this.db.prepare('SELECT * FROM incidents WHERE id<? ORDER BY id DESC LIMIT 100').all(before) as unknown as IncidentView[]);
+    const activeIncidents = incidentViews(this.db.prepare('SELECT * FROM incidents WHERE endedAt IS NULL ORDER BY id DESC').all() as unknown as IncidentView[]);
     const counts = this.db.prepare("SELECT SUM(state='pending') AS pending,SUM(state='failed') AS failed,SUM(state='delivered') AS delivered,MAX(deliveredAt) AS lastDeliveredAt FROM notifications").get() as { pending: number | null; failed: number | null; delivered: number | null; lastDeliveredAt: number | null };
-    return { generatedAt: now, healthy: this.healthy(now), checks, incidents, notifications: { configured: !!this.delivery, provider: this.delivery?.provider || 'SMTP not configured', minimumSeverity: this.config.minimumSeverity, pending: counts.pending || 0, failed: counts.failed || 0, delivered: counts.delivered || 0, lastDeliveredAt: counts.lastDeliveredAt }, retentionDays: 30 };
+    return { generatedAt: now, healthy: this.healthy(now), checks, incidents, activeIncidents, notifications: { configured: !!this.delivery, provider: this.delivery?.provider || 'SMTP not configured', minimumSeverity: this.config.minimumSeverity, pending: counts.pending || 0, failed: counts.failed || 0, delivered: counts.delivered || 0, lastDeliveredAt: counts.lastDeliveredAt }, retentionDays: 30 };
   }
 }

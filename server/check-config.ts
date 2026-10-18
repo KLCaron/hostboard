@@ -4,6 +4,7 @@ import { z } from 'zod';
 const identifier = z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/);
 const common = {
   id: identifier, name: z.string().min(1).max(80), hostId: identifier,
+  group: z.enum(['Applications', 'Infrastructure']).optional(),
   container: z.string().min(1).max(128).optional(),
   intervalSeconds: z.number().int().min(10).max(3600).default(60),
   timeoutMs: z.number().int().min(100).max(30000).default(5000),

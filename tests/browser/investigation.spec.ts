@@ -8,7 +8,6 @@ test('real fleet, deep links, historical controls, diagnostics and container inv
   expect(await page.locator('.stat-label').first().evaluate(el=>parseFloat(getComputedStyle(el).fontSize))).toBeGreaterThanOrEqual(12);
   await expect(page.locator('.stat-note').first()).toHaveCSS('font-size','12px');
   await expect(host.getByText('Online',{exact:true})).toBeVisible();
-  await expect(page.locator('.services-panel')).toHaveJSProperty('open',false);
   await host.getByRole('button',{name:'Explore host'}).click();
   await expect(host.getByText('Available retention:',{exact:false})).toBeVisible();
   const explorer=host.getByRole('region',{name:'Metric investigation'});
@@ -61,29 +60,40 @@ test('real fleet, deep links, historical controls, diagnostics and container inv
   expect(errors).toEqual([]);
 });
 
-test('real alert details, resolved incidents and compact service semantics',async({page,request},info)=>{
+test('real metric issues retain thresholds, recovery history and container investigations',async({page,request},info)=>{
   const fleet=await (await request.get('/api/fleet')).json();
   const current=await (await request.get(`/api/hosts/${fleet.hosts[0].id}/alerts`)).json();
   await page.goto('/');
-  await page.getByRole('button',{name:/^Alerts/}).click();
-  await expect(page.getByRole('heading',{name:'Alert investigation'})).toBeVisible();
+  await page.getByRole('button',{name:'Issues',exact:true}).click();
+  await expect(page.getByRole('heading',{name:'Active issues',exact:true})).toBeVisible();
+  await page.getByLabel('Issue type',{exact:true}).selectOption('metric');
+  await page.getByLabel('Host',{exact:true}).selectOption(fleet.hosts[0].id);
   const dialog=page.getByRole('dialog');
   if(current.active.length) {
-    await page.locator('.host-alerts').first().getByRole('button').filter({hasText:current.active[0].summary}).first().click();
+    await page.locator('.issue-results').getByRole('button').filter({hasText:current.active[0].summary}).first().click();
     await expect(dialog.getByText('Warning rule:',{exact:false})).toBeVisible();
     if(current.active[0].warning) await expect(dialog.getByText('Warning rule:',{exact:false})).toContainText(current.active[0].warning);
     await expect(dialog.getByText(/Available retention:|no longer collected/)).toBeVisible();
     await page.getByRole('button',{name:'Close investigation'}).click();
-  } else await expect(page.locator('.host-alerts').first().getByText('No active warnings or critical alerts.')).toBeVisible();
-  await page.locator('.host-alerts').first().getByText(/Recently resolved/).click();
+  } else await expect(page.getByText('No active issues match these filters.')).toBeVisible();
+  await page.getByRole('tab',{name:'History',exact:true}).click();
   if(current.resolved.length) {
-    const resolved=page.locator('.host-alerts').first().getByRole('button',{name:/Resolved/}).first();
+    const resolved=page.locator('.issue-results').getByRole('button').filter({hasText:current.resolved[0].summary}).first();
     await expect(resolved).toBeVisible();await resolved.click();
     await expect(dialog.getByText('before clearing',{exact:false})).toBeVisible();
     await expect(dialog.getByText(/Available retention:|no longer collected/)).toBeVisible();
     await page.keyboard.press('Escape');
-  } else await expect(page.locator('.host-alerts').first().getByText(/No resolved incidents/)).toBeVisible();
-  await page.getByRole('button',{name:'Overview',exact:true}).click();
+  } else await expect(page.getByText('No historical issues match these filters.')).toBeVisible();
+  const bookmarked=current.resolved[0]||current.active[0];
+  if(bookmarked){
+    await page.goto(`/#alert=${fleet.hosts[0].id}:${encodeURIComponent(bookmarked.id)}`);
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByText('Warning rule:',{exact:false})).toBeVisible();
+    await page.reload();
+    await expect(dialog).toBeVisible();
+    await page.getByRole('button',{name:'Close investigation'}).click();
+  }
+  await page.getByRole('button',{name:'Services',exact:true}).click();
   await page.locator('.services-panel>summary').click();
   await page.locator('.service-list>details>summary').first().click();
   await expect(page.locator('.service-list').getByText(/Application availability: not independently checked/).first()).toBeVisible();
@@ -171,6 +181,7 @@ test('dragging the plot and timeline selects a real range and zoom queries that 
   await page.mouse.move(b.x+b.width*.8,b.y+b.height/2);await page.mouse.down();
   await page.mouse.move(b.x+b.width*.3,b.y+b.height/2,{steps:10});await page.mouse.up();
   await expect(zoom).toBeEnabled();
+  await end.evaluate(el=>el.scrollIntoView({block:'center'}));
   const handle=(await end.boundingBox())!;const previousEnd=Number(await end.getAttribute('aria-valuenow'));
   await page.mouse.move(handle.x+handle.width/2,handle.y+handle.height/2);await page.mouse.down();
   await page.mouse.move(handle.x+handle.width/2-b.width*.1,handle.y+handle.height/2,{steps:8});await page.mouse.up();

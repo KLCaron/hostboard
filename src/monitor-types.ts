@@ -1,6 +1,7 @@
 export type CheckState = 'up' | 'down' | 'pending' | 'unknown';
 export interface CheckView {
   id: string; name: string; hostId: string; container?: string; type: 'http' | 'tcp';
+  group?: 'Applications' | 'Infrastructure'; lastSuccessfulAt?: number | null;
   state: CheckState; checkedAt: number | null; responseMs: number | null; reason: string;
   failures: number; failureThreshold: number; intervalSeconds: number; severity: string;
   notify: boolean; activeIncident: number | null;
@@ -17,6 +18,7 @@ export interface IncidentView {
 }
 export interface MonitorView {
   generatedAt: number; healthy: boolean; checks: CheckView[]; incidents: IncidentView[];
+  activeIncidents?: IncidentView[];
   notifications: { configured: boolean; provider: string; minimumSeverity: string; pending: number; failed: number; delivered: number; lastDeliveredAt: number | null };
   retentionDays: number;
 }

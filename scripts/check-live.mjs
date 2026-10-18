@@ -86,3 +86,19 @@ const assets = [...html.matchAll(/(?:src|href)="(\/assets\/[^\"]+)"/g)].map((m) 
 assert.ok(assets.length > 0);
 for (const asset of assets) assert.equal((await fetch(new URL(asset, base))).status, 200);
 console.log('HTTP page/assets, security headers, range validation and proxy isolation verified.');
+const monitor = await fetchApi('/api/monitor');
+assert.equal(monitor.healthy, true, 'Service monitor coverage');
+assert.ok(Array.isArray(monitor.activeIncidents));
+assert.ok(monitor.activeIncidents.every(i => i.endedAt === null));
+assert.equal(new Set(monitor.activeIncidents.map(i => i.id)).size, monitor.activeIncidents.length);
+for (const check of monitor.checks) {
+  assert.equal(check.state, 'up', `${check.name}: reachability`);
+  assert.ok(check.checkedAt > 0 && check.lastSuccessfulAt > 0, `${check.name}: observation and last success`);
+  assert.ok(check.trend.some(p => p.responseMs !== null), `${check.name}: retained response history`);
+}
+for (const section of ['overview', 'servers', 'services', 'issues', 'settings', 'alerts', 'incidents']) {
+  const response = await fetch(new URL('/' + section, base));
+  assert.equal(response.status, 200, `${section}: bookmarked path`);
+  assert.match(response.headers.get('cache-control') || '', /no-cache/);
+}
+console.log(`${monitor.checks.length}/${monitor.checks.length} service checks reachable; scheduler, retained trends, active incidents and section/legacy paths verified.`);

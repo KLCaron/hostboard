@@ -1744,3 +1744,33 @@ summary {cursor:pointer;}
 .recent-incidents .alerts-heading { padding: 0 0 14px; flex-wrap: wrap; }
 .recent-incidents .alerts-heading .text-button { font-size: 12px; min-height: 32px; gap: 4px; }
 .monitor-panel { background: #14161c; border-color: #2b2d32; }
+
+/* Navigation and operational summaries. */
+.health-summary { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:14px; margin:0 0 24px; }
+.health-summary h2 { color:#cfdfc0; }.health-summary p { color:#a0ad9b; }
+.health-attention { display:flex; flex-wrap:wrap; gap:12px; width:100%; }
+.health-attention a { text-decoration:none; }
+.issue-tabs { margin-top:24px; }
+.issue-filters { display:flex; flex-wrap:wrap; align-items:end; gap:12px; margin:20px 0; }
+.issue-filters label { display:grid; gap:7px; font-size:12px; color:#a5b19e; min-width:130px; flex:1; }
+.issue-filters select { color:#d0d8ca; background:#191e25; border:1px solid #39424a; border-radius:8px; padding:10px; width:100%; }
+.issue-record { border-top:1px solid #30383c; padding:18px 0; }
+.issue-record>.severity { margin-left:10px; }
+.issue-source { color:#b5bdcf; font-size:12px; }.issue-source.availability { color:#efb6a0; }.issue-source.notification { color:#e4bc81; }
+.issue-record .incident-row { border-top:0; }
+.issue-record .investigation-alert { margin:8px 0; width:100%; padding:12px 0; }
+.empty-issues { padding:24px 0; color:#9eaaa0; line-height:1.6; }
+.notification-settings p + p { margin-top:12px; }
+.monitoring-view .search { margin-bottom:0; }.monitoring-view .monitor-panel { margin-top:0; }
+.nav-label { overflow:hidden; }
+@media (max-width:720px) {
+  .sidebar { position:fixed; inset:auto 0 0; width:100%; height:76px; padding:6px 8px max(6px,env(safe-area-inset-bottom)); border-right:0; border-top:1px solid #30363b; z-index:20; background:#11151bf5; }
+  .sidebar .brand,.sidebar .workspace-label,.sidebar .sidebar-bottom { display:none; }
+  .sidebar nav { display:flex; flex-direction:row; margin:0; gap:3px; width:100%; }
+  .sidebar nav button { display:flex; flex:1; flex-direction:column; position:relative; padding:9px 2px; font-size:11px; gap:7px; margin:0; }
+  .sidebar nav .nav-label { display:block; }.sidebar nav .nav-count { display:block; position:absolute; right:5px; top:2px; font-size:10px; padding:1px 4px; }
+  .main-shell { margin-left:0; padding-bottom:82px; }
+  .issue-filters { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .issue-filters label { min-width:0; }
+  .health-summary { align-items:flex-start; }.health-summary h2 { font-size:18px; }
+}

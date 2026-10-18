@@ -97,7 +97,7 @@ for (const endpoint of ['metrics', 'diagnostics', 'alerts', 'metric-history'] as
 app.use('/api', (_req, res) => res.status(404).json({ error: 'Unknown endpoint' }));
 const client = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../client');
 app.use(express.static(client, { maxAge: '1h', index: false }));
-app.get('/', (_req, res) =>
+app.get(['/', '/overview', '/servers', '/services', '/issues', '/settings', '/alerts', '/incidents'], (_req, res) =>
   res.sendFile(path.join(client, 'index.html'), { headers: { 'Cache-Control': 'no-cache' } }),
 );
 const bind = process.env.HOSTBOARD_BIND || '127.0.0.1',
