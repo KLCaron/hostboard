@@ -405,6 +405,11 @@ test("HB-003 real 100-check mixed slow/fast load has no overlapping work and bou
     }
     assert(!overlap);
     assert(peak <= 8);
+    assert.equal(
+      m.healthy(),
+      false,
+      "overdue starts remain visible even just after fresh responses",
+    );
     assert(m.view().checks.every((c) => c.checkedAt !== null));
     t.diagnostic(
       `100 checks (80 x 1500ms, 20 x 5ms) observed twice in ${Date.now() - started}ms; peak workers ${peak}`,

@@ -45,6 +45,7 @@ export class Monitor {
   private readonly namespace: string;
   private timer?: ReturnType<typeof setInterval>;
   private running = new Set<string>();
+  private delayed = new Set<string>();
   private deliveries = new Map<
     number,
     { checkId: string; controller: AbortController }
@@ -152,6 +153,7 @@ export class Monitor {
           )
           .run(check.id, generation, fingerprint, now);
         if (old && changed) {
+          this.delayed.delete(check.id);
           this.db
             .prepare(
               "UPDATE incidents SET endedAt=?,resolution='Check configuration changed',monitoringGap=1 WHERE checkId=? AND endedAt IS NULL",
@@ -185,6 +187,7 @@ export class Monitor {
           .run(check.id, fingerprint, generation);
       }
       for (const id of disabled) {
+        this.delayed.delete(id);
         if (
           !this.disabled.has(id) &&
           this.db
@@ -419,6 +422,8 @@ export class Monitor {
         }
       }
       this.db.exec("COMMIT");
+      if (gap || result.ok === null) this.delayed.add(check.id);
+      else this.delayed.delete(check.id);
     } catch (error) {
       this.db.exec("ROLLBACK");
       throw error;
@@ -712,6 +717,8 @@ export class Monitor {
           const s = this.state(c.id)!;
           return (
             s.checked !== null &&
+            s.ok !== null &&
+            !this.delayed.has(c.id) &&
             now - s.checked < c.intervalSeconds * 2 + c.timeoutMs / 1000
           );
         })
