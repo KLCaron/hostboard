@@ -18,3 +18,15 @@ test-results/
 *.pem
 *.key
 *.tar.gz
+.ssh/
+.secrets/
+secrets/
+credentials/
+*credentials*.json
+.envrc
+.netrc
+*.p12
+*.tsbuildinfo
+CLAUDE.md
+GEMINI.md
+.cursor/

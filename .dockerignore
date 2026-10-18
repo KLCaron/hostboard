@@ -9,3 +9,10 @@ dist
 config/hosts.json
 test-results
 playwright-report
+.ssh
+.secrets
+secrets
+credentials
+*credentials*.json
+.envrc
+.netrc
