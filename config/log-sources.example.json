@@ -1,0 +1,13 @@
+{
+  "sources": [
+    {
+      "id": "web",
+      "name": "Web application",
+      "labels": {
+        "com.docker.compose.project": "example",
+        "com.docker.compose.service": "web",
+        "com.docker.compose.container-number": "1"
+      }
+    }
+  ]
+}

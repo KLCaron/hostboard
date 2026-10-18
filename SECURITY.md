@@ -1,6 +1,6 @@
 # Security
 
-Hostboard v0.5 receives fixes on `main`; use a current supported release. This project has undergone a practical release security review, not a formal audit or a guarantee of complete security.
+Hostboard v0.6 receives fixes on `main`; use a current supported release. This project has undergone a practical release security review, not a formal audit or a guarantee of complete security.
 
 For a sensitive vulnerability, use the repository's private GitHub vulnerability reporting if available, or contact the maintainer privately through their GitHub profile before disclosing exploit details. Do not post credentials, tokens, private endpoints, or backups in an issue. Public non-sensitive hardening reports can use GitHub Issues.
 
@@ -15,6 +15,8 @@ Only deployment-owned Agent origins and administrator-approved service host/port
 Containers run without root by default, with a read-only root filesystem, no capabilities, no Docker socket, no-new-privileges, resource limits, restricted temporary storage and bounded logs. The default published interface is loopback. Keep Agent APIs and data/private mounts protected. Backups include credentials and require restricted permissions and secure off-host storage. Never commit `.env`, private files, databases, or local AI/deployment notes.
 
 SMTP requires verified TLS; transport credentials remain outside SQLite/browser APIs. Responses use generic transport errors, bounded bodies and timeouts. Security headers deny framing, external scripts and third-party connections. Rate limits bound API and sign-in traffic; manual probes and mail tests have additional limits.
+
+Optional log retrieval always requires server-side administrator authorization, including Cloudflare deployments. A dedicated SSH key reaches only a forced-command, allowlisted Docker log reader. The main container has no Docker socket. The helper’s socket access remains root-equivalent if compromised; see the [log privilege review and setup](docs/logs.md). No raw log bodies or searches are stored in the access audit. Source listings, queries and associations are not public monitoring APIs.
 
 ## Known limitations
 

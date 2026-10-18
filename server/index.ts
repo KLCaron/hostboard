@@ -1,5 +1,6 @@
 import express from "express";
 import { readFileSync } from "node:fs";
+import { logsAPI, loadLogConfig, SSHLogProvider } from "./logs.js";
 import { validateWindow } from "./investigation.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -81,6 +82,7 @@ app.use(
     bootstrapTargets(seed.checks),
   ),
 );
+app.use("/api/admin/logs", logsAPI(configuration, monitor, admin, agents.map(a=>a.config.id), new SSHLogProvider(loadLogConfig(agents.map(a=>a.config.id)))));
 app.get("/api/system", async (_req, res) => {
   const hosts = await Promise.all(agents.map((a) => a.current()));
   const view = monitor.view(undefined, undefined, false);

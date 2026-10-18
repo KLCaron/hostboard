@@ -1,6 +1,6 @@
 # Hostboard
 
-> Use v0.5.3 for the monitoring reliability fixes. The initial v0.5.0 image has a local-login defect; v0.5.1 fixes it while retaining strict CSRF protection. Existing Cloudflare Access deployments are unaffected.
+> v0.6 adds optional, administrator-protected Docker logs and incident investigation, retaining the independently verified v0.5.3 monitoring reliability baseline.
 
 A self-hosted dashboard for servers monitored by **Netdata Agents**. View live metrics, historical charts, Docker resources, Netdata alerts, service availability, and persistent incidents in one place.
 
@@ -10,6 +10,7 @@ Hostboard queries existing Agents directly. It does not replace Netdata's collec
 
 - Multiple servers, filesystem capacity, temperatures, network and disk throughput.
 - Historical metric investigation, diagnostics, container resources, and alert history.
+- Optional Docker logs with time windows, search, live tail and incident navigation through a restricted SSH adapter.
 - HTTP/TCP service checks, outage/recovery tracking, and optional SMTP notifications.
 - Customizable Overview layout and browser preferences.
 - Local administrator login or existing Cloudflare Access JWT verification.
@@ -22,7 +23,7 @@ Requires Linux, Git, Docker Engine with Compose v2, and at least one reachable N
 ```sh
 git clone https://github.com/KLCaron/hostboard.git
 cd hostboard
-git checkout v0.5.3
+git checkout v0.6.0
 ./scripts/setup.sh
 ./scripts/setup.sh --check
 docker compose up -d --wait
@@ -68,12 +69,16 @@ Add, test, disable, or archive HTTP/TCP checks in **Settings → Services**. Fir
 
 SMTP is optional. Configure `private/smtp.json` during setup or from the [SMTP example](config/smtp.example.json), then recreate the container. Settings controls recipients, severity, cooldown, recovery, and a rate-limited test email. Netdata notifications and an optional independent watchdog remain separately operated. [Configuration reference](docs/configuration.md).
 
+## Optional container logs
+
+Read approved Docker stdout/stderr from container and service details, or open related logs around an incident. All log APIs require server-side administrator authorization. The optional forced-command SSH adapter runs on each Docker host; the main application never mounts a Docker socket. No new port or log-storage stack is required. Review the [setup, privilege boundary and limitations](docs/logs.md) before enabling it.
+
 ## Backup, upgrade and recovery
 
 ```sh
 ./scripts/manage.sh backup ./backups/manual
 # After reviewing a newer release, substitute its exact version or digest:
-./scripts/manage.sh upgrade ghcr.io/klcaron/hostboard:0.5.3 ./backups/before-upgrade
+./scripts/manage.sh upgrade ghcr.io/klcaron/hostboard:0.6.0 ./backups/before-upgrade
 # Restore the paired image, configuration, and database if necessary:
 ./scripts/manage.sh rollback ./backups/before-upgrade
 ```
@@ -82,7 +87,7 @@ Backups contain credentials and should be copied securely off-host. The helper u
 
 ## Documentation and support
 
-[Installation](docs/installation.md) · [Networking](docs/networking.md) · [Authentication / Cloudflare Access](docs/authentication.md) · [Configuration](docs/configuration.md) · [Service checks](docs/service-checks.md) · [Operations](docs/operations.md) · [Troubleshooting](docs/troubleshooting.md) · [Security](SECURITY.md) · [Contributing](CONTRIBUTING.md)
+[Installation](docs/installation.md) · [Networking](docs/networking.md) · [Authentication / Cloudflare Access](docs/authentication.md) · [Configuration](docs/configuration.md) · [Service checks](docs/service-checks.md) · [Operations](docs/operations.md) · [Container logs](docs/logs.md) · [Troubleshooting](docs/troubleshooting.md) · [Security](SECURITY.md) · [Contributing](CONTRIBUTING.md)
 
 Report bugs and feature requests in [GitHub Issues](https://github.com/KLCaron/hostboard/issues). Include the Hostboard version, sanitized configuration, browser, and relevant logs. Do not post credentials, tokens, real monitoring endpoints, or database backups. Follow [SECURITY.md](SECURITY.md) for sensitive reports.
 

@@ -1,6 +1,6 @@
 {
   "name": "hostboard",
-  "version": "0.5.3",
+  "version": "0.6.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit",
     "test:integration": "python3 tests/clean_install.py",
     "test:image-browser": "tsx tests/image-browser.ts",
-    "test:reliability-integration": "tsx tests/reliability-integration.ts"
+    "test:reliability-integration": "tsx tests/reliability-integration.ts",
+    "test:logs-integration": "python3 tests/log_container.py && tsx tests/log-ssh-integration.ts"
   },
   "dependencies": {
     "@inquirer/prompts": "^8.7.3",

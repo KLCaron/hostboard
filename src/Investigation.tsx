@@ -1,3 +1,4 @@
+import { LogPanel } from './Logs';
 import {useDisplay} from './display';
 import { chartTooltipTheme } from './chartTheme';
 import type { CheckView } from './monitor-types';
@@ -126,7 +127,13 @@ export function HostDiagnostics({host, range}:{host:Host;range:Range}) {
 export function HostExplorer({host,range}:{host:Host;range:Range}) {
   const {data,error,loading}=useData<Metric[]>(`/api/hosts/${host.id}/metrics`,60000);
   const contexts=['system.cpu','system.ram','system.net','system.io','system.load'];
-  return <>{loading&&<p role="status">Loading metric catalog…</p>}{error&&<div className="notice danger">{error}</div>}{data&&<Explorer host={host} charts={data.filter(c=>contexts.includes(c.context))} range={range}/>}</>;
+  const [hash,setHash]=useState(location.hash);
+  useEffect(()=>{const update=()=>setHash(location.hash);window.addEventListener('hashchange',update);return()=>window.removeEventListener('hashchange',update);},[]);
+  const params=new URLSearchParams(hash.split('?')[1]??'');
+  const after=Number(params.get('after')),before=Number(params.get('before'));
+  const initialWindow=Number.isSafeInteger(after)&&Number.isSafeInteger(before)&&after>0&&before>after&&before-after<=86400&&before<=Date.now()/1000+60?{after,before}:undefined;
+  const incident=params.get('incident');
+  return <>{loading&&<p role="status">Loading metric catalog…</p>}{error&&<div className="notice danger">{error}</div>}{initialWindow&&<p className="small muted">Historical log investigation window · {date(after)} – {date(before)}{incident&&/^[1-9]\d{0,14}$/.test(incident)&&<> · <a className="text-link" href={`#incident=${incident}`}>Return to incident →</a></>}</p>}{data&&<Explorer key={hash} host={host} charts={data.filter(c=>contexts.includes(c.context))} range={range} initialWindow={initialWindow}/>}</>;
 }
 export function Containers({host,onInvestigate}:{host:Host;onInvestigate:(target:InvestigationTarget)=>void}) {
   const [sort,setSort]=useState<Sort>(()=>readPreference('containerSort','name',v=>['name','cpu','memory'].includes(String(v))));
@@ -162,6 +169,7 @@ function HostAlerts({host,onInvestigate}:{host:Host;onInvestigate:(target:Invest
 }
 export function InvestigationDialog({target,onClose}:{target:InvestigationTarget;onClose:()=>void}) {
   const ref=useRef<HTMLDialogElement>(null);
+  const [tab,setTab]=useState('metrics');
   const {host,container,alert}=target;
   const {data,error,loading}=useData<Metric[]>(`/api/hosts/${host.id}/metrics`,0);
   useEffect(()=>{ const dialog=ref.current!;dialog.showModal();return()=>dialog.close(); },[]);
@@ -171,6 +179,6 @@ export function InvestigationDialog({target,onClose}:{target:InvestigationTarget
   return <dialog ref={ref} className="investigation-dialog" onCancel={onClose}><div className="dialog-heading"><div><h2>{alert?.summary||container?.name||'Metric investigation'}</h2><a className="text-link" href={`#host=${host.id}`} onClick={onClose}>{host.name} →</a></div><button autoFocus aria-label="Close investigation" onClick={onClose}>×</button></div>
     {alert&&<><div className="chart-statistics"><span>{alert.state} · {alert.severity}</span><span>{alert.resource}</span><span>{fmt(alert.value)} {alert.units}{alert.resolved?' before clearing':''}</span></div><p className="detail-description">{alert.info}</p><p>Started / state changed: {date(alert.startedAt)} · {alert.resolved?`resolved ${date(alert.endedAt)}`:'active'} · duration {duration(alert.duration??(alert.startedAt?Date.now()/1000-alert.startedAt:null))}</p><p className="detail-description">Warning rule: {alert.warning||'Unavailable'}<br/>Critical rule: {alert.critical||'Unavailable'}</p><p className="detail-description">Rules are Netdata expressions. Chart dimensions may differ from the alert’s calculated or rolling value.</p></>}
     {container&&<p className="detail-description">{containerStatus(container,host.status==='online')} · Docker check: {container.health||'unknown'} · See Services for configured application availability checks. CPU 100% = one core; memory in MiB. Network in kilobits/s, disk in KiB/s.</p>}
-    {loading&&<p role="status">Loading metrics…</p>}{error&&<div className="notice danger">{error}</div>}{data&&(charts.length?<Explorer host={host} charts={charts} initialChart={target.chart||charts.find(c=>c.context==='cgroup.cpu')?.id} initialWindow={initialWindow}/>:<p className="empty-chart">This resource’s metric is no longer collected or is unavailable. Alert details remain available above.</p>)}
+    <div className="detail-tabs" role="tablist" aria-label="Investigation view">{['metrics','logs'].map(t=><button key={t} role="tab" aria-selected={tab===t} className={tab===t?'active':''} onClick={()=>setTab(t)}>{t==='metrics'?'Metrics':'Logs'}</button>)}</div>{tab==='logs'?<LogPanel context={{hostId:host.id,container:container?.name}} initialWindow={initialWindow?{after:new Date(initialWindow.after*1000).toISOString(),before:new Date(Math.min(initialWindow.before,initialWindow.after+86400)*1000).toISOString()}:undefined}/>:<>{loading&&<p role="status">Loading metrics…</p>}{error&&<div className="notice danger">{error}</div>}{data&&(charts.length?<Explorer host={host} charts={charts} initialChart={target.chart||charts.find(c=>c.context==='cgroup.cpu')?.id} initialWindow={initialWindow}/>:<p className="empty-chart">This resource’s metric is no longer collected or is unavailable. Alert details remain available above.</p>)}</>}
   </dialog>;
 }

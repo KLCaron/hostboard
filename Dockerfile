@@ -10,7 +10,7 @@ RUN npm run build
 
 FROM node:24-alpine@sha256:44fce696f38ba8c987c4db89954051000bbd05ffd8d8659ba15ed4a8602e937f AS runtime
 LABEL org.opencontainers.image.licenses="AGPL-3.0-only"
-ARG VERSION=0.5.3
+ARG VERSION=0.6.0
 ARG REVISION=unknown
 LABEL org.opencontainers.image.source="https://github.com/KLCaron/hostboard" \
       org.opencontainers.image.version=$VERSION \
@@ -18,7 +18,8 @@ LABEL org.opencontainers.image.source="https://github.com/KLCaron/hostboard" \
 ENV NODE_ENV=production PORT=8088
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev && npm cache clean --force \
+RUN apk add --no-cache openssh-client-default \
+    && npm ci --omit=dev && npm cache clean --force \
     && rm -rf /usr/local/lib/node_modules/npm /opt/yarn-* \
     && rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/yarn /usr/local/bin/yarnpkg
 COPY --from=build /app/dist ./dist

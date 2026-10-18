@@ -21,6 +21,7 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: npm run test:reliability-integration
+      - run: npm run test:logs-integration
       - run: npx playwright install --with-deps firefox
       - run: npm run test:browser
       - run: docker build -t hostboard:ci .
