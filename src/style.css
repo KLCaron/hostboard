@@ -12,6 +12,10 @@
   font-synthesis: none;
   font-size: 16px;
   color-scheme: dark;
+  --chart-tooltip-background: #20252d;
+  --chart-tooltip-foreground: #e9ebef;
+  --chart-tooltip-label: #b7bec9;
+  --chart-tooltip-border: #586272;
   -webkit-font-smoothing: antialiased;
 }
 * {
@@ -847,16 +851,19 @@ select {
   margin-top: 12px;
 }
 .chart-tip {
-  background: #20252d;
-  border: 1px solid #404753;
+  background: var(--chart-tooltip-background);
+  color: var(--chart-tooltip-foreground);
+  border: 1px solid var(--chart-tooltip-border);
   border-radius: 8px;
   padding: 10px 13px;
   font-size: 12px;
   box-shadow: 0 8px 20px #0005;
+  max-width: calc(100vw - 32px);
+  overflow-wrap: anywhere;
 }
 .chart-tip > b {
   display: block;
-  color: #a0a7b2;
+  color: var(--chart-tooltip-label);
   margin-bottom: 6px;
   font-weight: 400;
 }

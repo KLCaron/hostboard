@@ -1,4 +1,5 @@
 import {useDisplay} from './display';
+import { chartTooltipTheme } from './chartTheme';
 import type { CheckView } from './monitor-types';
 import { checkLabel } from './Monitoring';
 import { HistorySelection, type Selection } from './HistorySelection';
@@ -96,7 +97,7 @@ export function Explorer({ host, charts, initialChart, initialWindow, range = '1
       {points.some(p=>p[`${dimension}:average`] != null) ? <>
       <HistorySelection times={points.map(p=>p.time)} selection={selection} onChange={setSelection} onStart={()=>setPaused(true)}><ResponsiveContainer width="100%" height="100%"><LineChart data={points} margin={{left:0,right:12,top:8,bottom:0}}>
         <CartesianGrid vertical={false} stroke="#292e36"/><XAxis dataKey="time" type="number" domain={['dataMin','dataMax']} tickFormatter={t=>new Date(t*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})} minTickGap={45} tick={{fontSize:12}}/><YAxis width={54} tick={{fontSize:12}} domain={['auto','auto']}/>
-        <Tooltip labelFormatter={t=>date(Number(t))} formatter={(v)=>fmt(typeof v==='number'?v:null)} contentStyle={{background:'#20252d',border:'1px solid #404753',borderRadius:8}}/>
+        <Tooltip {...chartTooltipTheme} labelFormatter={t=>date(Number(t))} formatter={(v)=>fmt(typeof v==='number'?v:null)}/>
         <Line dataKey={`${dimension}:min`} name="Minimum" stroke="#71808e" dot={false} isAnimationActive={false} connectNulls={false}/>
         <Line dataKey={`${dimension}:max`} name="Peak" stroke="#dfbe8b" dot={false} isAnimationActive={false} connectNulls={false}/>
         <Line dataKey={`${dimension}:average`} name="Average" stroke="#b9e692" strokeWidth={2} dot={false} isAnimationActive={false} connectNulls={false}/>

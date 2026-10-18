@@ -165,7 +165,7 @@ function ChartTip({
             : ""}
       </b>
       {payload.map((p, i) => (
-        <span key={i} style={{ color: p.color }}>
+        <span key={i}>
           {p.name}:{" "}
           {typeof p.value === "number"
             ? unit === "network"

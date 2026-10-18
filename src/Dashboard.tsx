@@ -8,6 +8,7 @@ import {
   Tooltip,
 } from "recharts";
 import { readPreference, savePreference } from "./preferences";
+import { chartTooltipTheme } from './chartTheme';
 import {
   normalizeLayout,
   moveWidget,
@@ -184,6 +185,7 @@ function MetricWidget({
                 />
                 <YAxis width={45} stroke="#88968e" fontSize={11} />
                 <Tooltip
+                  {...chartTooltipTheme}
                   formatter={(v) =>
                     typeof v === "number"
                       ? isTemp
