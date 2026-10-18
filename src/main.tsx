@@ -1,7 +1,6 @@
 import React, { useEffect, useId, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
-  Activity,
   ArrowDownLeft,
   ArrowUpRight,
   Bell,
@@ -19,7 +18,6 @@ import {
   Network,
   RefreshCw,
   Server,
-  ShieldCheck,
   Thermometer,
   X,
 } from 'lucide-react';
@@ -669,7 +667,7 @@ function App() {
           </span>
           hostboard<span className="beta">BETA</span>
         </a>
-        <div className="workspace-label">YOUR WORKSPACE</div>
+        <div className="workspace-label">MONITORING</div>
         <nav aria-label="Main navigation">
           <button
             className={page === 'overview' ? 'selected' : ''}
@@ -694,15 +692,9 @@ function App() {
           </button>
         </nav>
         <div className="sidebar-bottom">
-          <div className="private-note">
-            <ShieldCheck size={17} />
-            <div>
-              Private by design<span>Your servers. Your data.</span>
-            </div>
-          </div>
           <button className="about-button" onClick={() => setHelp(true)}>
             <CircleHelp size={16} />
-            About Hostboard
+            Dashboard info
             <ChevronRight size={14} />
           </button>
         </div>
@@ -711,7 +703,7 @@ function App() {
         <header className="topbar">
           <span>
             <Layers3 size={15} />
-            <b>Workspace</b>
+            <b>Monitoring</b>
             <ChevronRight size={13} />
             {page === 'overview' ? 'Overview' : page === 'servers' ? 'Servers' : 'Alerts'}
           </span>
@@ -729,19 +721,9 @@ function App() {
         <main>
           <section className="page-heading">
             <div>
-              <div className="eyebrow">INFRASTRUCTURE, SIMPLIFIED</div>
               <h1>
-                {page === 'overview'
-                  ? 'Your fleet, at a glance.'
-                  : page === 'servers'
-                    ? 'A home for every host.'
-                    : 'Keep the important in view.'}
+                {page === 'overview' ? 'Fleet overview' : page === 'servers' ? 'Servers' : 'Alerts'}
               </h1>
-              <p>
-                {page === 'alerts'
-                  ? 'Warnings and critical alerts, straight from your Agents.'
-                  : 'A clear view of your servers. Just the signals that matter.'}
-              </p>
             </div>
             <button
               className="refresh-button"
@@ -775,7 +757,7 @@ function App() {
                   </div>
                   <span className="stat-note">
                     {!fleet
-                      ? 'Connecting to your fleet'
+                      ? 'Connecting to hosts'
                       : online.length === hosts.length
                         ? 'All hosts reporting'
                         : 'Some hosts need attention'}
@@ -836,9 +818,9 @@ function App() {
               <section className="section-heading">
                 <div>
                   <h2>
-                    Your servers <span>{hosts.length || '—'}</span>
+                    Servers <span>{hosts.length || '—'}</span>
                   </h2>
-                  <p>Live snapshots with a little perspective.</p>
+                  <p>Current metrics · {rangeLabels[range]} history</p>
                 </div>
                 <div className="range-picker" role="group" aria-label="Historical time range">
                   {ranges.map((r) => (
@@ -896,13 +878,9 @@ function App() {
                 </span>
                 <div>
                   <h2>
-                    Needs your attention <span>{alertCount}</span>
+                    Active alerts <span>{alertCount}</span>
                   </h2>
-                  <p>
-                    {alerts.length
-                      ? 'A few signals worth a closer look.'
-                      : 'A quieter moment for your infrastructure.'}
-                  </p>
+                  <p>Warnings and critical alerts.</p>
                 </div>
                 {page === 'overview' && (
                   <button className="text-button" onClick={() => navigate('alerts')}>
@@ -950,7 +928,7 @@ function App() {
           <footer>
             <span>
               <span className="footer-dot" />
-              Collected by Netdata. Curated by Hostboard.
+              Metrics: Netdata
             </span>
             <span>
               {age === null ? 'Connecting…' : `Updated ${age < 2 ? 'just now' : `${age}s ago`}`}
@@ -972,31 +950,25 @@ function App() {
             <button
               className="close-modal"
               onClick={() => setHelp(false)}
-              aria-label="Close about dialog"
+              aria-label="Close dashboard info"
               autoFocus
             >
               <X size={20} />
             </button>
-            <ShieldCheck size={32} className="green-text" />
-            <h2 id="about-title">
-              Your infrastructure.
-              <br />
-              Your own space.
-            </h2>
+            <h2 id="about-title">Dashboard info</h2>
             <p>
-              Hostboard connects privately to your Netdata Agents. Collection, history and alerts
-              stay with Netdata; this dashboard gives them a calmer home.
+              Live metrics refresh every 10 seconds. Historical charts refresh every 30 seconds.
             </p>
             <p>
-              No account, ads, analytics or external fonts. Live snapshots refresh every 10 seconds;
-              historical charts refresh every 30 seconds.
+              Charts show up to 180 averaged samples for the selected time range. Gaps indicate
+              missing data.
             </p>
             <p>
-              Missing samples stay empty. Offline and stale hosts are excluded from fleet totals.
-              Historical data is averaged to fit the selected range.
+              Offline and stale hosts are excluded from fleet totals. Container CPU usage is
+              measured per core: 100% equals one core.
             </p>
             <button className="primary-button" onClick={() => setHelp(false)}>
-              Back to the fleet
+              Close
             </button>
           </section>
         </div>

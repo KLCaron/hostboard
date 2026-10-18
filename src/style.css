@@ -179,27 +179,6 @@ nav button.selected svg {
 .sidebar-bottom {
   margin-top: auto;
 }
-.private-note {
-  border: 1px solid #282e2a;
-  border-radius: 10px;
-  background: linear-gradient(110deg, #1b211b70, #13171b);
-  padding: 14px 11px;
-  display: flex;
-  gap: 9px;
-  align-items: flex-start;
-  font-size: 11px;
-  line-height: 1.6;
-  color: #b6c6ad;
-}
-.private-note svg {
-  margin-top: 1px;
-  color: #9ab285;
-}
-.private-note span {
-  display: block;
-  color: #777e85;
-  font-size: 10px;
-}
 .about-button {
   display: flex;
   align-items: center;
@@ -263,24 +242,11 @@ main {
   align-items: center;
   margin-bottom: 29px;
 }
-.eyebrow {
-  font-size: 9px;
-  letter-spacing: 1.9px;
-  color: #8c9d82;
-  font-weight: 600;
-  margin-bottom: 10px;
-}
 h1 {
   font-size: clamp(23px, 2.3vw, 34px);
   font-weight: 500;
   letter-spacing: -1.1px;
   line-height: 1.25;
-}
-.page-heading p {
-  color: #7d8592;
-  font-size: 12px;
-  margin-top: 9px;
-  line-height: 1.6;
 }
 .refresh-button {
   display: flex;
@@ -1026,9 +992,6 @@ td small {
 .warning-text {
   color: #d5b17c !important;
 }
-.green-text {
-  color: #b5d598;
-}
 .empty-chart {
   height: 130px;
   display: flex;
@@ -1280,7 +1243,6 @@ td small {
     height: 33px;
   }
   .workspace-label,
-  .private-note,
   .nav-count,
   .sidebar-bottom .about-button svg:last-child {
     display: none;
@@ -1367,22 +1329,13 @@ td small {
     margin-bottom: 23px;
     align-items: flex-start;
   }
-  .page-heading p {
-    font-size: 11px;
-    max-width: 250px;
-  }
   h1 {
     font-size: 27px;
     letter-spacing: -1px;
     max-width: 260px;
   }
-  .eyebrow {
-    font-size: 8px;
-    letter-spacing: 1.4px;
-  }
   .refresh-button {
     padding: 9px;
-    margin-top: 23px;
   }
   .refresh-button span {
     display: none;
