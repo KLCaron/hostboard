@@ -11,8 +11,15 @@ services:
       HOSTBOARD_BIND: ${HOSTBOARD_BIND:-127.0.0.1}
       PORT: ${HOSTBOARD_PORT:-8088}
       HOSTBOARD_CONFIG: /app/config/hosts.json
+      HOSTBOARD_CHECKS: /app/config/checks.json
+      HOSTBOARD_DB: /app/data/monitor.sqlite
+      HOSTBOARD_SMTP_CONFIG: /app/private/smtp.json
+      HOSTBOARD_PUBLIC_URL: ${HOSTBOARD_PUBLIC_URL:-}
     volumes:
       - ./config/hosts.json:/app/config/hosts.json:ro
+      - ./config/checks.json:/app/config/checks.json:ro
+      - ${HOSTBOARD_PRIVATE_DIR:-./private}:/app/private:ro
+      - ${HOSTBOARD_DATA_DIR:-./data}:/app/data
     read_only: true
     tmpfs:
       - /tmp:size=16M,noexec,nosuid

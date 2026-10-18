@@ -1,3 +1,5 @@
+import type { CheckView } from './monitor-types';
+import { checkLabel } from './Monitoring';
 import { HistorySelection, type Selection } from './HistorySelection';
 import { servicesFromHosts } from './services';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -132,14 +134,15 @@ export function Containers({host,onInvestigate}:{host:Host;onInvestigate:(target
     </tr>)}</tbody></table></div>{!host.containers.length&&<p className="empty-chart">No containers reported by this Agent.</p>}
   </>;
 }
-export function Services({hosts,onInvestigate}:{hosts:Host[];onInvestigate:(target:InvestigationTarget)=>void}) {
+export function Services({hosts,checks=[],onInvestigate}:{hosts:Host[];checks?:CheckView[];onInvestigate:(target:InvestigationTarget)=>void}) {
   const services=servicesFromHosts(hosts);
   const [filter,setFilter]=useState('');
   return <details className="services-panel"><summary>Services <span>{services.length} containers · expand to inspect</span></summary>
     <p className="detail-description">Container state, configured Docker health checks, and independent application availability are separate signals.</p>
     <input aria-label="Filter services" placeholder="Find an application or host…" value={filter} onChange={e=>setFilter(e.target.value)}/>
-    <div className="service-list">{services.filter(({host,container:c})=>`${host.name} ${c.name}`.toLowerCase().includes(filter.toLowerCase())).map(({host,container:c,availability})=><details key={host.id+c.name}><summary><b>{c.name}</b><span>{host.name}</span><span>{containerStatus(c,host.status==='online')}</span><span>{host.status==='online'?fmt(c.cpu):'—'}% · {host.status==='online'?fmt(c.memory):'—'} MiB</span></summary>
-      <p>Docker health check: {host.status!=='online'?'unknown':c.health==='no_healthcheck'?'not configured':c.health||'unknown'}. Application availability: {availability.state==='unchecked'?'not independently checked':`${availability.state} (${availability.method}, ${availability.checkedAt})`}.</p>
+    <div className="service-list">{services.filter(({host,container:c})=>`${host.name} ${c.name}`.toLowerCase().includes(filter.toLowerCase())).map(({host,container:c,availability})=><details key={host.id+c.name}><summary><b>{c.name}</b><span>{host.name}</span><span>{containerStatus(c,host.status==='online')}</span>{checks.filter(x=>x.hostId===host.id&&x.container===c.name).map(x=><span key={x.id} className={`check-state ${x.state}`}>{checkLabel(x)}</span>)}<span>{host.status==='online'?fmt(c.cpu):'—'}% · {host.status==='online'?fmt(c.memory):'—'} MiB</span></summary>
+      <p>Docker health check: {host.status!=='online'?'unknown':c.health==='no_healthcheck'?'not configured':c.health||'unknown'}. Application availability: {availability.state==='unchecked'?(checks.some(x=>x.hostId===host.id&&x.container===c.name)?'see independent check below':'not independently checked'):`${availability.state} (${availability.method}, ${availability.checkedAt})`}.</p>
+      {checks.filter(x=>x.hostId===host.id&&x.container===c.name).map(x=><p key={x.id}>Application availability: {checkLabel(x)} · {x.reason} · <a className="text-link" href={x.activeIncident?`#incident=${x.activeIncident}`:'#incident=0'}>Check history →</a></p>)}
       <button className="text-link" onClick={()=>onInvestigate({host,container:c})}>Investigate resources →</button> · <a className="text-link" href={`#host=${host.id}`}>Open host</a>
     </details>)}</div>{!services.length&&<p className="muted">No Docker services are currently reported.</p>}
   </details>;
@@ -162,7 +165,7 @@ export function InvestigationDialog({target,onClose}:{target:InvestigationTarget
   const initialWindow=alert?.startedAt?{after:Math.floor(Math.max(alert.startedAt-900, end-31*86400+900)),before:Math.floor(Math.min(Date.now()/1000, Math.max(end+(!alert.endedAt?0:900),alert.startedAt+30)))}:undefined;
   return <dialog ref={ref} className="investigation-dialog" onCancel={onClose}><div className="dialog-heading"><div><h2>{alert?.summary||container?.name||'Metric investigation'}</h2><a className="text-link" href={`#host=${host.id}`} onClick={onClose}>{host.name} →</a></div><button autoFocus aria-label="Close investigation" onClick={onClose}>×</button></div>
     {alert&&<><div className="chart-statistics"><span>{alert.state} · {alert.severity}</span><span>{alert.resource}</span><span>{fmt(alert.value)} {alert.units}{alert.resolved?' before clearing':''}</span></div><p className="detail-description">{alert.info}</p><p>Started / state changed: {date(alert.startedAt)} · {alert.resolved?`resolved ${date(alert.endedAt)}`:'active'} · duration {duration(alert.duration??(alert.startedAt?Date.now()/1000-alert.startedAt:null))}</p><p className="detail-description">Warning rule: {alert.warning||'Unavailable'}<br/>Critical rule: {alert.critical||'Unavailable'}</p><p className="detail-description">Rules are Netdata expressions. Chart dimensions may differ from the alert’s calculated or rolling value.</p></>}
-    {container&&<p className="detail-description">{containerStatus(container,host.status==='online')} · Docker check: {container.health||'unknown'} · Application availability: not independently checked. CPU 100% = one core; memory in MiB. Network in kilobits/s, disk in KiB/s.</p>}
+    {container&&<p className="detail-description">{containerStatus(container,host.status==='online')} · Docker check: {container.health||'unknown'} · See Services for configured application availability checks. CPU 100% = one core; memory in MiB. Network in kilobits/s, disk in KiB/s.</p>}
     {loading&&<p role="status">Loading metrics…</p>}{error&&<div className="notice danger">{error}</div>}{data&&(charts.length?<Explorer host={host} charts={charts} initialChart={target.chart||charts.find(c=>c.context==='cgroup.cpu')?.id} initialWindow={initialWindow}/>:<p className="empty-chart">This resource’s metric is no longer collected or is unavailable. Alert details remain available above.</p>)}
   </dialog>;
 }

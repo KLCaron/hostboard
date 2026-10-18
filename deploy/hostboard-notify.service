@@ -1,0 +1,16 @@
+[Unit]
+Description=Retry Netdata notification delivery independently of Hostboard
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=netdata
+Group=netdata
+Environment=HOSTBOARD_SMTP_CONFIG=/etc/hostboard/smtp.json
+ExecStart=/usr/bin/python3 /usr/local/lib/hostboard/notify.py --flush
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/netdata
+PrivateTmp=yes
+TimeoutStartSec=120

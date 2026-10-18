@@ -7,6 +7,11 @@ dist
 .aws
 .env*
 config/hosts.json
+config/checks.json
+config/smtp.json
+private
+data
+*.sqlite*
 test-results
 playwright-report
 .ssh

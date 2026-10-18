@@ -1717,3 +1717,30 @@ summary {cursor:pointer;}
 .history-brush-handle > span { display: grid; place-items: center; width: 18px; height: 30px; background: #303c2a; border: 1px solid #a7c68c; border-radius: 4px; color: #cce1bb; font-size: 12px; pointer-events: none; }
 .history-brush-handle:focus-visible { outline: 2px solid #c1e79d; border-radius: 6px; outline-offset: 1px; }
 .history-brush-labels { display: flex; justify-content: space-between; gap: 12px; margin-top: 7px; font-size: 12px; color: #879584; }
+
+/* Availability and incident details follow the existing bento surfaces. */
+.monitoring-view { display: grid; gap: 20px; }
+.monitor-panel { background: var(--panel, #181e1b); border: 1px solid var(--border, #303a33); border-radius: 16px; padding: 22px; margin-top: 20px; min-width: 0; }
+.monitor-panel h2 { font-size: 18px; margin-bottom: 8px; }
+.monitor-panel p { line-height: 1.6; }
+.monitor-panel summary { cursor: pointer; }
+.check-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr)); gap: 12px; margin-top: 18px; }
+.check-card { border: 1px solid #354038; border-radius: 12px; min-width: 0; }
+.check-card > summary { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 16px; list-style: none; }
+.check-card summary div { display: grid; gap: 6px; }
+.check-card summary div span { color: #a0aca3; font-size: 12px; }
+.check-state { display: inline-block; font-size: 12px; color: #b3beb7; white-space: normal; }
+.check-state.up { color: #bbdf93; }.check-state.down { color: #f39b91; }.check-state.pending { color: #e4bc81; }.check-state.unknown { color: #b9b5cd; }
+.check-detail, .incident-detail { border-top: 1px solid #354038; padding: 16px; font-size: 13px; overflow-wrap: anywhere; }
+.check-detail dl, .incident-detail dl { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 8px 12px; margin: 14px 0; }
+.check-detail dt, .incident-detail dt { color: #9eaaa2; }.check-detail dd, .incident-detail dd { margin: 0; }
+.response-chart { height: 150px; min-width: 0; margin-top: 12px; }
+.incident-row { border-top: 1px solid #354038; }
+.incident-row > summary { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; padding: 16px 0; font-size: 13px; list-style: none; }
+.incident-row summary > b { flex: 1; min-width: 120px; }.incident-row summary > span { color: #a8b5ac; }.incident-row summary > .up { color: #bbdf93; }.incident-row summary > .down { color: #f39b91; }
+.notification-settings summary { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; }.notification-settings summary span { color: #b9c6bb; }
+.delivery-list { margin: 16px 0; }.delivery-list p { margin: 8px 0; }
+@media (max-width: 600px) { .monitor-panel { padding: 16px; }.incident-row > summary { gap: 8px; }.incident-row > summary > span { font-size: 12px; }.check-detail dl, .incident-detail dl { grid-template-columns: 95px minmax(0, 1fr); }.notification-settings summary { flex-wrap: wrap; } }
+.recent-incidents .alerts-heading { padding: 0 0 14px; flex-wrap: wrap; }
+.recent-incidents .alerts-heading .text-button { font-size: 12px; min-height: 32px; gap: 4px; }
+.monitor-panel { background: #14161c; border-color: #2b2d32; }

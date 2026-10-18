@@ -6,6 +6,11 @@ coverage/
 .env.*
 !.env.example
 config/hosts.json
+config/checks.json
+config/smtp.json
+private/
+data/
+*.sqlite*
 .ai-local/
 AGENTS.md
 **/AGENTS.md

@@ -5,7 +5,12 @@ import { fileURLToPath } from 'node:url';
 import { loadConfig, privateBind } from './config.js';
 import { Agent, RANGES } from './netdata.js';
 import type { Range } from '../src/types.js';
+import { loadChecks } from './check-config.js';
+import { Monitor } from './monitor.js';
+import { smtpDelivery } from './notifications.js';
 const agents = loadConfig().hosts.map((host) => new Agent(host));
+const monitor = new Monitor(loadChecks(agents.map(a => a.config.id)), process.env.HOSTBOARD_DB || 'data/monitor.sqlite', smtpDelivery());
+monitor.start();
 const app = express();
 app.disable('x-powered-by');
 app.use((_req, res, next) => {
@@ -23,6 +28,19 @@ app.use('/api', (_req, res, next) => {
   res.set('Cache-Control', 'no-store');
   next();
 });
+app.get('/api/monitor-health', (_req, res) => res.status(monitor.healthy() ? 200 : 503).json({ status: monitor.healthy() ? 'ok' : 'unavailable' }));
+app.get('/api/monitor', (req, res) => {
+  const before = req.query.before;
+  if (before !== undefined && (typeof before !== 'string' || !/^\d{1,15}$/.test(before) || Number(before) < 1)) { res.status(400).json({ error: 'Invalid incident cursor' }); return; }
+  res.json(monitor.view(undefined, before === undefined ? undefined : Number(before)));
+});
+app.get('/api/incidents/:id', (req, res) => {
+  if (!/^\d{1,15}$/.test(req.params.id)) { res.status(400).json({ error: 'Invalid incident ID' }); return; }
+  const id = Number(req.params.id);
+  const incident = monitor.view(undefined, id + 1).incidents.find(i => i.id === id);
+  if (!incident) { res.status(404).json({ error: 'Unknown incident' }); return; }
+  res.json(incident);
+});
 app.get('/api/fleet', async (_req, res) =>
   res.json({
     hosts: await Promise.all(agents.map((agent) => agent.current())),
@@ -30,6 +48,12 @@ app.get('/api/fleet', async (_req, res) =>
     refreshSeconds: 10,
   }),
 );
+app.get('/api/hosts/:id/health', async (req, res) => {
+  const agent = agents.find(a => a.config.id === req.params.id);
+  if (!agent) { res.status(404).json({ error: 'Unknown host' }); return; }
+  const host = await agent.current();
+  res.status(host.status === 'online' ? 200 : 503).json({ status: host.status === 'online' ? 'ok' : 'unavailable' });
+});
 app.get('/api/hosts/:id/history', async (req, res) => {
   const agent = agents.find((a) => a.config.id === req.params.id);
   if (!agent) {
@@ -92,6 +116,7 @@ const servers = addresses.map((address) =>
   ),
 );
 process.on('SIGTERM', () => {
+  monitor.stop();
   let remaining = servers.length;
   for (const server of servers) {
     server.close(() => {

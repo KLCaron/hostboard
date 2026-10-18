@@ -1,0 +1,8 @@
+{
+  "host": "smtp.gmail.com",
+  "port": 587,
+  "username": "alerts@example.com",
+  "password": "REPLACE_WITH_APP_PASSWORD",
+  "from": "alerts@example.com",
+  "to": ["recipient@example.com"]
+}

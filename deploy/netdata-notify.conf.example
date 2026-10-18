@@ -1,0 +1,10 @@
+# Merge with /etc/netdata/health_alarm_notify.conf on the PARENT ONLY.
+# Netdata evaluates alerts. Custom delivery adds a durable SMTP queue.
+SEND_EMAIL="NO"
+SEND_CUSTOM="YES"
+DEFAULT_RECIPIENT_CUSTOM="hostboard"
+custom_sender() {
+    /usr/bin/python3 /usr/local/lib/hostboard/notify.py --netdata \
+        "${host}" "${alarm_id}" "${name}" "${status}" "${when}" \
+        "${non_clear_duration:-0}" "${info}" "${chart}" "${value_string}"
+}

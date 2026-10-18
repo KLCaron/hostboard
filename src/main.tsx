@@ -33,6 +33,7 @@ import {
 } from 'recharts';
 import type { Fleet, History, Host, Point, Range } from './types';
 import './style.css';
+import { useMonitoring, RecentIncidents, Monitoring } from './Monitoring';
 const ranges: Range[] = ['15m', '1h', '6h', '24h'];
 const rangeLabels: Record<Range, string> = {
   '15m': '15 min',
@@ -377,7 +378,7 @@ function App() {
   const [fleet, setFleet] = useState<Fleet>(),
     [histories, setHistories] = useState<Record<string, History>>({}),
     [range, setRange] = useState<Range>(() => readPreference('range','1h',v=>ranges.includes(v as Range))),
-    [page, setPage] = useState<'overview' | 'servers' | 'alerts'>('overview'),
+    [page, setPage] = useState<'overview' | 'servers' | 'alerts' | 'incidents'>('overview'),
     [expanded, setExpanded] = useState<string | null>(null),
     [error, setError] = useState<string | null>(null),
     [historyError, setHistoryError] = useState<string | null>(null),
@@ -386,10 +387,11 @@ function App() {
     [now, setNow] = useState(Date.now()),
     [help, setHelp] = useState(false),
     [query, setQuery] = useState('');
+  const monitoring = useMonitoring(refresh);
   const [target,setTarget] = useState<InvestigationTarget | null>(null);
   useEffect(()=>{ savePreference('range',range); },[range]);
   useEffect(()=>{
-    const link=()=>{const match=location.hash.match(/^#host=([a-zA-Z0-9_-]+)$/);if(match){setPage('servers');setExpanded(match[1]);setQuery('');}};
+    const link=()=>{if (/^#incident=\d+$/.test(location.hash)) {setPage('incidents'); return;} const match=location.hash.match(/^#host=([a-zA-Z0-9_-]+)$/);if(match){setPage('servers');setExpanded(match[1]);setQuery('');}};
     link();window.addEventListener('hashchange',link);return()=>window.removeEventListener('hashchange',link);
   },[]);
   useEffect(() => {
@@ -542,6 +544,7 @@ function App() {
             <Bell size={18} />
             Alerts{alertCount > 0 && <span className="nav-count alert-count">{alertCount}</span>}
           </button>
+          <button className={page === 'incidents' ? 'selected' : ''} onClick={() => navigate('incidents')}><Clock3 size={18}/>Incidents</button>
         </nav>
         <div className="sidebar-bottom">
           <button className="about-button" onClick={() => setHelp(true)}>
@@ -557,7 +560,7 @@ function App() {
             <Layers3 size={15} />
             <b>Monitoring</b>
             <ChevronRight size={13} />
-            {page === 'overview' ? 'Overview' : page === 'servers' ? 'Servers' : 'Alerts'}
+            {page === 'overview' ? 'Overview' : page === 'servers' ? 'Servers' : page === 'incidents' ? 'Incidents' : 'Alerts'}
           </span>
           <div>
             <span className={`connection-dot ${error || outdated ? 'disconnected' : ''}`} />
@@ -574,7 +577,7 @@ function App() {
           <section className="page-heading">
             <div>
               <h1>
-                {page === 'overview' ? 'Fleet overview' : page === 'servers' ? 'Servers' : 'Alerts'}
+                {page === 'overview' ? 'Fleet overview' : page === 'servers' ? 'Servers' : page === 'incidents' ? 'Incidents' : 'Alerts'}
               </h1>
             </div>
             <button
@@ -596,7 +599,7 @@ function App() {
                 : 'Waiting for a connection to the Hostboard backend.'}
             </div>
           )}
-          {page !== 'alerts' && (
+          {(page === 'overview' || page === 'servers') && (
             <section className="fleet-stats" aria-label="Fleet summary">
               <div className="stat-card">
                 <span className="stat-icon green">
@@ -666,7 +669,7 @@ function App() {
               </div>
             </section>
           )}
-          {page !== 'alerts' && (
+          {(page === 'overview' || page === 'servers') && (
             <>
               <section className="section-heading">
                 <div>
@@ -725,7 +728,9 @@ function App() {
             </>
           )}
           {page === 'alerts' && <Alerts hosts={hosts} onInvestigate={setTarget} />}
-          {page === 'overview' && <Services hosts={hosts} onInvestigate={setTarget} />}
+          {page === 'incidents' && <Monitoring data={monitoring.data} error={monitoring.error} />}
+          {page === 'overview' && <RecentIncidents data={monitoring.data} openHistory={() => navigate('incidents')} />}
+          {page === 'overview' && <Services hosts={hosts} checks={monitoring.data?.checks} onInvestigate={setTarget} />}
           {page === 'overview' && (
             <section className="alerts-panel">
               <div className="alerts-heading">
