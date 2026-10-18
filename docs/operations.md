@@ -2,7 +2,9 @@
 
 ## Distribution
 
-Stable release image: `ghcr.io/klcaron/hostboard:0.6.0`, Linux amd64/arm64. Each `vX.Y.Z` Git tag must match `package.json`. Publishing runs tests before building, and refuses an existing version tag. Do not move Git tags or republish an existing version. GHCR allows administrators to change tags, so use the published **sha256 manifest digest** for immutable deployments. The GitHub Release records that digest; build metadata/SBOM/provenance are attached to the image. No moving `latest` tag is published. Maintainers may dispatch a verified `candidate-<commit>` image for pre-release acceptance; it is not a stable release. Only reviewed stable semantic versions are released.
+Stable release image: `ghcr.io/klcaron/hostboard:0.6.1`, Linux amd64/arm64. Each `vX.Y.Z` Git tag must match `package.json`. Publishing runs tests before building, and refuses an existing version tag. Do not move Git tags or republish an existing version. GHCR allows administrators to change tags, so use the published **sha256 manifest digest** for immutable deployments. The GitHub Release records that digest; build metadata/SBOM/provenance are attached to the image. No moving `latest` tag is published. Maintainers may dispatch a verified `candidate-<commit>` image for pre-release acceptance; it is not a stable release. Only reviewed stable semantic versions are released.
+
+`v0.6.0` remains an early candidate Git tag; no stable v0.6.0 image or GitHub Release was published. v0.6.1 is the refined stable release. It keeps schema 3, the existing source identities, log query bounds and adapter privileges unchanged.
 
 Use `HOSTBOARD_IMAGE=ghcr.io/klcaron/hostboard@sha256:...` in `.env` to pin the complete multi-platform release. Keep a copy of the selected source release alongside your deployment files to satisfy source availability and recover the matching helpers. No automatic updater is installed.
 
@@ -14,7 +16,7 @@ Run from the release directory, preserving its `.env`, `config`, `private`, and 
 
 ```sh
 ./scripts/manage.sh backup ./backups/manual
-./scripts/manage.sh upgrade ghcr.io/klcaron/hostboard:0.6.0 ./backups/before-upgrade
+./scripts/manage.sh upgrade ghcr.io/klcaron/hostboard:0.6.1 ./backups/before-upgrade
 ```
 
 Substitute the intended newer version/digest for an actual upgrade. The helper first makes a consistent SQLite online backup plus `.env`, Agent/bootstrap configuration, private authentication/SMTP configuration, and image metadata. Then it pulls the image, persists that reference in `.env`, recreates Hostboard, and waits up to two minutes for container health. Database initialization/migrations occur during startup. Review the release's schema/rollback notes before upgrading. Keep a second copy of backups off-host; credentials are plaintext within these restricted-permission directories. Use encrypted off-host storage appropriate for your environment.

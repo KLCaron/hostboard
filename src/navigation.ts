@@ -1,4 +1,4 @@
-export const pages = ['overview', 'servers', 'services', 'issues', 'settings'] as const;
+export const pages = ['overview', 'servers', 'services', 'logs', 'issues', 'settings'] as const;
 export type Page = typeof pages[number];
 export function resolveNavigation(hash: string, pathname = '/') {
   const value = hash.slice(1) || pathname.replace(/^\/+|\/+$/g, '');

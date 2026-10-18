@@ -13,7 +13,7 @@ export const GeneralSchema = z
     refreshSeconds: z.number().int().min(10).max(300),
     temperature: z.enum(["C", "F"]),
     range: z.enum(["15m", "1h", "6h", "24h"]),
-    landing: z.enum(["overview", "servers", "services", "issues", "settings"]),
+    landing: z.enum(["overview", "servers", "services", "logs", "issues", "settings"]),
     compact: z.boolean(),
   })
   .strict();

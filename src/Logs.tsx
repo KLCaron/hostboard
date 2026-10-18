@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type {
   LogContext,
   LogCursor,
@@ -8,15 +8,24 @@ import type {
   LogResult,
   LogSource,
 } from "./log-types";
+import type { Host, Range } from "./types";
+import { readPreference, savePreference } from "./preferences";
+import { RangeSelector, rangeSeconds } from "./RangeSelector";
+import {
+  logLink,
+  parseLogRoute,
+  replaceLogState,
+  type LogWindow,
+} from "./log-navigation";
 const errorText = (e: unknown) =>
   e instanceof Error ? e.message : "Log source unavailable";
-async function api(
+export async function logApi(
   route: string,
   body?: unknown,
   signal?: AbortSignal,
   method = "POST",
 ) {
-  const response = await fetch(`/api/admin/logs/${route}`, {
+  const r = await fetch(`/api/admin/logs/${route}`, {
     method: body === undefined ? "GET" : method,
     signal,
     headers:
@@ -25,10 +34,11 @@ async function api(
         : { "Content-Type": "application/json", "X-Hostboard-Request": "1" },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  const result = await response.json();
-  if (!response.ok) throw Error(result.error || "Log request failed");
+  const result = await r.json();
+  if (!r.ok) throw Error(result.error || "Log request failed");
   return result;
 }
+const api = logApi;
 const localDate = (value: string) => {
   const d = new Date(value);
   return new Date(d.getTime() - d.getTimezoneOffset() * 60000)
@@ -36,59 +46,135 @@ const localDate = (value: string) => {
     .slice(0, 19);
 };
 const iso = (value: string) => new Date(value).toISOString();
-const defaultWindow = () => ({
-  after: new Date(Date.now() - 900000).toISOString(),
-  before: new Date().toISOString(),
-});
 export function LogSection({
   context,
   initialWindow,
 }: {
   context: LogContext;
-  initialWindow?: { after: string; before: string };
+  initialWindow?: LogWindow;
 }) {
-  const [open, setOpen] = useState(false);
   return (
-    <section className="log-section">
-      <button
-        className="text-link"
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
+    <div className="log-section">
+      <a className="action-link" href={logLink(context, initialWindow)}>
+        {context.incidentId ? "View related logs" : "View logs"} →
+      </a>
+    </div>
+  );
+}
+export function LogsPage({ hosts }: { hosts: Host[] }) {
+  const [hash, setHash] = useState(location.hash);
+  useEffect(() => {
+    const update = () => setHash(location.hash);
+    window.addEventListener("hashchange", update);
+    window.addEventListener("popstate", update);
+    return () => {
+      window.removeEventListener("hashchange", update);
+      window.removeEventListener("popstate", update);
+    };
+  }, []);
+  const route = parseLogRoute(hash);
+  const remembered = readPreference(
+    "logHost",
+    "",
+    (v) => typeof v === "string",
+  );
+  const host =
+    route.host ||
+    (hosts.some((h) => h.id === remembered) ? remembered : hosts[0]?.id) ||
+    "";
+  const validHost = hosts.some((h) => h.id === host);
+  const hostControl = (
+    <label className="log-source-label">
+      Host
+      <select
+        aria-label="Log host"
+        value={host}
+        onChange={(e) => {
+          savePreference("logHost", e.target.value);
+          location.hash = logLink({ hostId: e.target.value });
+        }}
       >
-        {context.incidentId ? "View related logs" : "Logs"} {open ? "−" : "+"}
-      </button>
-      {open && <LogPanel context={context} initialWindow={initialWindow} />}
+        {!validHost && <option value={host}>{host || "Loading hosts…"}</option>}
+        {hosts.map((h) => (
+          <option key={h.id} value={h.id}>
+            {h.name} · {h.status}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+  return (
+    <section className="monitor-panel logs-page" aria-label="Centralized logs">
+      <p className="detail-description">
+        Retained Docker logs · administrator access · no permanent log storage.
+      </p>
+      {route.alert && validHost && !route.invalid && (
+        <p className="notice">
+          Metric issue investigation ·{" "}
+          <a
+            className="text-link"
+            href={`#alert=${host}:${encodeURIComponent(route.alert)}`}
+          >
+            Return to metric issue →
+          </a>
+        </p>
+      )}
+      {route.invalid ? (
+        <>
+          {hostControl}
+          <p role="alert" className="notice danger">
+            Invalid log link. Choose a host to start a new investigation.
+          </p>
+        </>
+      ) : host && !validHost && hosts.length ? (
+        <>
+          {hostControl}
+          <p role="alert" className="notice danger">
+            Unknown host. Choose a configured host.
+          </p>
+        </>
+      ) : validHost ? (
+        <LogPanel
+          key={hash + host}
+          context={{ ...route.context, hostId: host }}
+          initialWindow={route.window}
+          initialSource={route.source}
+          initialRange={route.range}
+          hostControl={hostControl}
+        />
+      ) : (
+        <p role="status">Loading hosts…</p>
+      )}
     </section>
   );
 }
-export function LogPanel({
+function LogPanel({
   context,
   initialWindow,
+  initialSource,
+  initialRange,
+  hostControl,
 }: {
+  hostControl: ReactNode;
   context: LogContext;
-  initialWindow?: { after: string; before: string };
+  initialWindow?: LogWindow;
+  initialSource?: string;
+  initialRange?: Range | "custom";
 }) {
   const [admin, setAdmin] = useState<boolean>(),
     [sources, setSources] = useState<LogSource[]>([]),
     [mapped, setMapped] = useState<string[]>([]),
-    [draft, setDraft] = useState<string[]>([]),
     [source, setSource] = useState(""),
-    [configure, setConfigure] = useState(false),
     [error, setError] = useState(""),
-    [loading, setLoading] = useState(true),
-    [saving, setSaving] = useState(false);
+    [loading, setLoading] = useState(true);
   const hasContext = !!(
-      context.serviceId ||
-      context.container ||
-      context.incidentId
-    ),
-    key = JSON.stringify(context);
+    context.serviceId ||
+    context.container ||
+    context.incidentId
+  );
   useEffect(() => {
     const controller = new AbortController();
     let active = true;
-    setLoading(true);
-    setError("");
-    setSource("");
     void (async () => {
       const session = await (
         await fetch("/api/session", { signal: controller.signal })
@@ -96,17 +182,40 @@ export function LogPanel({
       if (!active) return;
       setAdmin(!!session.admin);
       if (!session.admin) return;
-      const [catalog, association] = await Promise.all([
-        api(`sources/${context.hostId}`, undefined, controller.signal),
-        hasContext
-          ? api("context", context, controller.signal)
-          : Promise.resolve({ sources: [] }),
-      ]);
+      const catalog = await api(
+        `sources/${context.hostId}`,
+        undefined,
+        controller.signal,
+      );
       if (!active) return;
       setSources(catalog.sources);
+      const association = hasContext
+        ? await api("context", context, controller.signal)
+        : { sources: [] };
+      if (!active) return;
       setMapped(association.sources);
-      setDraft(association.sources);
-      if (association.sources.length === 1) setSource(association.sources[0]);
+      const choices: LogSource[] = hasContext
+        ? catalog.sources.filter((s: LogSource) =>
+            association.sources.includes(s.id),
+          )
+        : catalog.sources;
+      const saved = hasContext
+        ? ""
+        : readPreference(
+            `logSource:${context.hostId}`,
+            "",
+            (v) => typeof v === "string",
+          );
+      const chosen =
+        initialSource || (choices.length === 1 ? choices[0].id : saved);
+      if (choices.some((s) => s.id === chosen)) {
+        setSource(chosen);
+        savePreference(`logSource:${context.hostId}`, chosen);
+        replaceLogState({ host: context.hostId, source: chosen });
+      } else if (initialSource)
+        setError(
+          "The linked source is not approved for this context. Choose an available source.",
+        );
     })()
       .catch((e) => {
         if (active) setError(errorText(e));
@@ -118,24 +227,71 @@ export function LogPanel({
       active = false;
       controller.abort();
     };
-  }, [key]);
-  if (loading) return <p role="status">Loading approved log sources…</p>;
+  }, [JSON.stringify(context)]);
+  if (loading)
+    return (
+      <>
+        {hostControl}
+        <p role="status">Loading approved log sources…</p>
+      </>
+    );
   if (admin === false)
     return (
-      <p className="notice">
-        Log contents require an authorized administrator. Sign in as a local
-        administrator or use an allowlisted Cloudflare Access identity.
-      </p>
+      <>
+        {hostControl}
+        <p className="notice">
+          Log contents require an authorized administrator. Sign in as a local
+          administrator or use an allowlisted Cloudflare Access identity.
+        </p>
+      </>
     );
   const choices = hasContext
     ? sources.filter((s) => mapped.includes(s.id))
     : sources;
+  const chosen = sources.find((s) => s.id === source);
+  const currentRoute = parseLogRoute(location.hash);
   return (
     <div className="log-panel">
-      <p className="small muted">
-        Sensitive operational data · read from this host’s retained Docker logs
-        · no long-term storage in Hostboard.
-      </p>
+      {context.incidentId && (
+        <p className="notice">
+          Investigating incident #{context.incidentId} ·{" "}
+          {initialWindow
+            ? `${new Date(initialWindow.after).toLocaleString()} – ${new Date(initialWindow.before).toLocaleString()}`
+            : "Choose a retained time window"}
+          .{" "}
+          <a className="text-link" href={`#incident=${context.incidentId}`}>
+            Return to incident →
+          </a>
+        </p>
+      )}
+      <div className="log-source-strip">
+        {hostControl}
+        {!!choices.length && (
+          <label className="log-source-label">
+            Log source
+            <select
+              aria-label="Log source"
+              value={source}
+              onChange={(e) => {
+                setSource(e.target.value);
+                savePreference(`logSource:${context.hostId}`, e.target.value);
+                replaceLogState({
+                  host: context.hostId,
+                  source: e.target.value || undefined,
+                });
+              }}
+            >
+              <option value="">Choose a source…</option>
+              {choices.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name} · {s.containerName ?? s.id}
+                  {!s.available ? " · unavailable" : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+      </div>
       {error && (
         <p className="notice danger" role="alert">
           {error}
@@ -148,106 +304,66 @@ export function LogPanel({
           File-only application logs are not supported.
         </p>
       )}
-      {hasContext && !!sources.length && (
-        <>
-          <p className="small">
-            {mapped.length
-              ? "Administrator-confirmed source association. The current container may differ from the one present during an older incident."
-              : "No confirmed log source association. Choose the correct approved source; service and container names alone do not establish identity."}
-          </p>
-          <button
+      {hasContext && (
+        <p className="small">
+          {mapped.length
+            ? `Confirmed sources for ${context.serviceId || context.container || "this incident"}.`
+            : "No confirmed log source association. Names alone do not establish container identity."}{" "}
+          <a
             className="text-link"
-            aria-expanded={configure}
-            onClick={() => setConfigure((v) => !v)}
+            href={logLink(context, undefined, "settings")}
           >
-            Associate log sources
-          </button>
-        </>
-      )}
-      {configure && (
-        <form
-          className="log-associations"
-          onSubmit={(e) => {
-            e.preventDefault();
-            setSaving(true);
-            setError("");
-            void api("context", { context, sources: draft }, undefined, "PUT")
-              .then(() => {
-                setMapped(draft);
-                setSource(draft.length === 1 ? draft[0] : "");
-                setConfigure(false);
-              })
-              .catch((e) => setError(errorText(e)))
-              .finally(() => setSaving(false));
-          }}
-        >
-          <p>
-            Confirm these sources belong to this{" "}
-            {context.incidentId
-              ? "incident’s historical service generation"
-              : context.serviceId
-                ? "service generation"
-                : "container resource"}
-            . Select multiple sources when needed.
-          </p>
-          {sources.map((s) => (
-            <label key={s.id}>
-              <input
-                type="checkbox"
-                checked={draft.includes(s.id)}
-                onChange={(e) =>
-                  setDraft((v) =>
-                    e.target.checked
-                      ? [...v, s.id]
-                      : v.filter((id) => id !== s.id),
-                  )
-                }
-              />
-              <span>
-                {s.name} · {s.containerName ?? "unavailable"} ·{" "}
-                {s.containerId?.slice(0, 12) ?? s.error}{" "}
-                {s.driver && `· ${s.driver}`}
-              </span>
-            </label>
-          ))}
-          <button disabled={saving}>
-            {saving ? "Saving…" : "Confirm associations"}
-          </button>
-        </form>
-      )}
-      {!!choices.length && (
-        <label className="log-source-label">
-          Log source
-          <select
-            aria-label="Log source"
-            value={source}
-            onChange={(e) => setSource(e.target.value)}
-          >
-            <option value="">Choose a source…</option>
-            {choices.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name} · {s.containerName ?? s.id}
-                {!s.available ? " · unavailable" : ""}
-              </option>
-            ))}
-          </select>
-        </label>
+            Configure source associations →
+          </a>{" "}
+          ·{" "}
+          <a className="text-link" href={logLink({ hostId: context.hostId })}>
+            Browse approved host sources →
+          </a>
+        </p>
       )}
       {mapped.some((id) => !sources.some((s) => s.id === id)) && (
         <p className="notice">
-          A previously associated source is no longer approved or available.
-          Review the source associations.
+          A previously associated source is no longer approved. Review the
+          source associations in Settings.
         </p>
       )}
-      {source && (
-        <LogExplorer
-          key={context.hostId + source}
-          hostId={context.hostId}
-          source={source}
-          initialWindow={initialWindow}
-          incidentId={context.incidentId}
-        />
+      {chosen && (
+        <details className="source-identity">
+          <summary>
+            {chosen.available ? "Available" : "Unavailable"} ·{" "}
+            {chosen.containerName ?? chosen.id} · Source details
+          </summary>
+          <p>
+            {context.hostId} / {chosen.id} ·{" "}
+            {chosen.containerId ?? chosen.error} · {chosen.driver}
+            {chosen.created &&
+              ` · Created ${new Date(chosen.created).toLocaleString()}`}
+          </p>
+          {context.incidentId && (
+            <p>
+              The current container may differ from the one present during an
+              older incident. Associations do not establish causality or prove
+              retained historical coverage.
+            </p>
+          )}
+        </details>
       )}
+      {source &&
+        (chosen?.available ? (
+          <LogExplorer
+            key={context.hostId + source}
+            hostId={context.hostId}
+            source={source}
+            initialWindow={currentRoute.window ?? initialWindow}
+            initialRange={currentRoute.range ?? initialRange}
+            incidentId={context.incidentId}
+          />
+        ) : (
+          <p className="notice">
+            Logs are unavailable for this source. Its association is preserved;
+            an operator must check its approved container identity and adapter.
+          </p>
+        ))}
     </div>
   );
 }
@@ -311,19 +427,46 @@ export function LogExplorer({
   source,
   initialWindow,
   incidentId,
+  initialRange,
 }: {
   hostId: string;
   source: string;
   initialWindow?: { after: string; before: string };
   incidentId?: number;
+  initialRange?: Range | "custom";
 }) {
-  const [window, setWindow] = useState(initialWindow ?? defaultWindow),
-    [draftAfter, setDraftAfter] = useState(() =>
-      localDate((initialWindow ?? defaultWindow()).after),
+  const savedRange = readPreference<Range>(
+    "logRange",
+    "15m",
+    (v) => typeof v === "string" && Object.hasOwn(rangeSeconds, v),
+  );
+  const initial = useRef(
+    initialWindow ??
+      (() => {
+        const before = Date.now();
+        return {
+          after: new Date(
+            before - rangeSeconds[savedRange] * 1000,
+          ).toISOString(),
+          before: new Date(before).toISOString(),
+        };
+      })(),
+  ).current;
+  const [window, setWindow] = useState(initial),
+    [range, setRange] = useState<Range | "custom">(
+      initialRange ?? (initialWindow ? "custom" : savedRange),
     ),
-    [draftBefore, setDraftBefore] = useState(() =>
-      localDate((initialWindow ?? defaultWindow()).before),
+    [dirty, setDirty] = useState(false),
+    [showTimes, setShowTimes] = useState(!!initialWindow),
+    [followEnd, setFollowEnd] = useState<string>(),
+    [wrap, setWrap] = useState(() =>
+      readPreference("logWrap", true, (v) => typeof v === "boolean"),
     ),
+    [zone, setZone] = useState(() =>
+      readPreference("logZone", "local", (v) => v === "local" || v === "utc"),
+    ),
+    [draftAfter, setDraftAfter] = useState(() => localDate(initial.after)),
+    [draftBefore, setDraftBefore] = useState(() => localDate(initial.before)),
     [search, setSearch] = useState(""),
     [sensitive, setSensitive] = useState(false),
     [stream, setStream] = useState<LogQuery["stream"]>("all"),
@@ -341,14 +484,16 @@ export function LogExplorer({
     [selected, setSelected] = useState<Set<number>>(new Set()),
     [message, setMessage] = useState(""),
     [evicted, setEvicted] = useState(false);
+  const startInput = useRef<HTMLInputElement>(null);
   const controller = useRef<AbortController | null>(null),
     cursor = useRef<LogCursor | null>(null),
     generation = useRef(0),
     inFlight = useRef(false),
-    viewport = useRef<HTMLDivElement>(null),
-    liveRef = useRef(false);
-  liveRef.current = live;
+    viewport = useRef<HTMLDivElement>(null);
   const windowKey = JSON.stringify([window, filter]);
+  useEffect(() => {
+    replaceLogState({ ...window, range });
+  }, [windowKey, range]);
   async function load(append = false, follow = false) {
     if (inFlight.current) return;
     const turn = generation.current;
@@ -358,7 +503,9 @@ export function LogExplorer({
     setBusy(true);
     setError("");
     try {
-      const before = follow ? new Date().toISOString() : window.before;
+      const before = follow
+        ? new Date().toISOString()
+        : (followEnd ?? window.before);
       const value: LogResult = await api(
         `query/${hostId}`,
         {
@@ -373,6 +520,11 @@ export function LogExplorer({
       if (turn !== generation.current) return;
       cursor.current = value.nextCursor ?? value.resumeCursor;
       setResult(value);
+      if (follow) {
+        setFollowEnd(before);
+        replaceLogState({ before, range: "custom" });
+        if (!dirty) setDraftBefore(localDate(before));
+      }
       setEntries((old) => {
         const all = append ? [...old, ...value.entries] : value.entries;
         let bytes = 0,
@@ -435,7 +587,7 @@ export function LogExplorer({
     if (!live) return;
     const timer = setInterval(() => void load(true, true), 3000);
     return () => clearInterval(timer);
-  }, [live, windowKey]);
+  }, [live, windowKey, followEnd]);
   useEffect(() => {
     if (live)
       viewport.current?.scrollTo({ top: viewport.current.scrollHeight });
@@ -455,7 +607,13 @@ export function LogExplorer({
         (i) => `${entries[i].time} [${entries[i].stream}] ${entries[i].text}`,
       )
       .join("\n");
-  const preset = (seconds: number) => {
+  const preset = (selected: Range) => {
+    const seconds = rangeSeconds[selected];
+    setShowTimes(false);
+    setFollowEnd(undefined);
+    setRange(selected);
+    savePreference("logRange", selected);
+    setDirty(false);
     stop();
     const end = Date.now(),
       w = {
@@ -468,18 +626,19 @@ export function LogExplorer({
   };
   return (
     <section className="log-explorer" aria-label="Log explorer">
-      <div className="log-presets" aria-label="Log time presets">
-        {[
-          [900, "15 minutes"],
-          [3600, "1 hour"],
-          [21600, "6 hours"],
-          [86400, "24 hours"],
-        ].map(([n, label]) => (
-          <button key={n} onClick={() => preset(Number(n))}>
-            {label}
-          </button>
-        ))}
-      </div>
+      <RangeSelector
+        label="Log time presets"
+        value={range}
+        custom
+        onChange={(r) => {
+          if (r === "custom") {
+            stop();
+            setRange(r);
+            setShowTimes(true);
+            setTimeout(() => startInput.current?.focus(), 0);
+          } else preset(r);
+        }}
+      />
       <form
         className="log-controls"
         onSubmit={(e) => {
@@ -488,11 +647,16 @@ export function LogExplorer({
             const w = { after: iso(draftAfter), before: iso(draftBefore) };
             if (
               Date.parse(w.after) >= Date.parse(w.before) ||
-              Date.parse(w.before) - Date.parse(w.after) > 86400000
+              Date.parse(w.before) - Date.parse(w.after) > 86400000 ||
+              Date.parse(w.before) > Date.now() + 60000
             )
               throw Error("Choose a range of at most 24 hours");
             stop();
-            setWindow(w);
+            setWindow(
+              dirty ? w : { ...window, before: followEnd ?? window.before },
+            );
+            setFollowEnd(undefined);
+            setDirty(false);
             setFilter({ search, caseSensitive: sensitive, stream });
             setRevision((v) => v + 1);
           } catch (e) {
@@ -500,28 +664,48 @@ export function LogExplorer({
           }
         }}
       >
-        <label>
-          Start (local time)
-          <input
-            aria-label="Log start"
-            type="datetime-local"
-            step="1"
-            required
-            value={draftAfter}
-            onChange={(e) => setDraftAfter(e.target.value)}
-          />
-        </label>
-        <label>
-          End (local time)
-          <input
-            aria-label="Log end"
-            type="datetime-local"
-            step="1"
-            required
-            value={draftBefore}
-            onChange={(e) => setDraftBefore(e.target.value)}
-          />
-        </label>
+        <details
+          className="log-time-fields"
+          open={showTimes}
+          onToggle={(e) => setShowTimes(e.currentTarget.open)}
+        >
+          <summary>Custom timestamps (local time)</summary>
+          <div className="log-time-inputs">
+            <label>
+              Start (local time)
+              <input
+                ref={startInput}
+                aria-label="Log start"
+                type="datetime-local"
+                step="1"
+                required
+                value={draftAfter}
+                onChange={(e) => {
+                  stop();
+                  setRange("custom");
+                  setDirty(true);
+                  setDraftAfter(e.target.value);
+                }}
+              />
+            </label>
+            <label>
+              End (local time)
+              <input
+                aria-label="Log end"
+                type="datetime-local"
+                step="1"
+                required
+                value={draftBefore}
+                onChange={(e) => {
+                  stop();
+                  setRange("custom");
+                  setDirty(true);
+                  setDraftBefore(e.target.value);
+                }}
+              />
+            </label>
+          </div>
+        </details>
         <label>
           Text search
           <input
@@ -560,13 +744,18 @@ export function LogExplorer({
         <button
           onClick={() => {
             if (live || busy) stop();
-            else if (Date.now() - Date.parse(window.after) >= 86300000) {
-              preset(900);
+            else if (
+              Date.now() - Date.parse(window.after) >= 86300000 ||
+              Date.now() - Date.parse(followEnd ?? window.before) > 900000
+            ) {
+              preset("15m");
+              setRange("custom");
               setLive(true);
               setMessage(
                 "Live tail opened the last 15 minutes. Use the incident link to return to its historical context.",
               );
             } else {
+              setRange("custom");
               setLive(true);
               void load(true, true);
             }
@@ -583,7 +772,7 @@ export function LogExplorer({
             ? "Live · every 3 seconds"
             : busy
               ? "Loading bounded log page…"
-              : "Paused"}
+              : "Paused · historical range"}
         </span>
         {!live && (
           <button
@@ -611,17 +800,17 @@ export function LogExplorer({
           ·{" "}
           <a
             className="text-link"
-            href={`#host=${hostId}?after=${Math.floor(Date.parse(window.after) / 1000)}&before=${Math.floor(Date.parse(window.before) / 1000)}&incident=${incidentId}`}
+            href={`#host=${hostId}?after=${Math.floor(Date.parse(window.after) / 1000)}&before=${Math.floor(Date.parse(followEnd ?? window.before) / 1000)}&incident=${incidentId}`}
           >
             Host metrics →
           </a>
         </p>
       )}
-      <p className="small muted">
-        UTC timestamps · {hostId} / {source}
-        {result &&
-          ` · ${result.containerName} (${result.containerId.slice(0, 12)}) · ${result.driver}${result.tty ? " · TTY combines stdout/stderr" : ""}`}
-      </p>
+      {result?.tty && (
+        <p className="notice">
+          TTY combines stdout/stderr; separate stream filtering is unavailable.
+        </p>
+      )}
       {result && Date.parse(result.created) > Date.parse(window.after) && (
         <p className="notice">
           This container was created at{" "}
@@ -649,54 +838,102 @@ export function LogExplorer({
           inspect them again.
         </p>
       )}
-      <div className="log-selection">
-        <span>
-          {entries.length} displayed · {selected.size} selected
-        </span>
-        <button
-          disabled={!entries.length || live}
-          onClick={() => setSelected(new Set(entries.map((_, i) => i)))}
-        >
-          Select displayed
-        </button>
-        <button
-          disabled={!selected.size}
-          onClick={() => setSelected(new Set())}
-        >
-          Clear selection
-        </button>
-        <button
-          disabled={!selected.size || live}
-          onClick={() => {
-            void navigator.clipboard
-              .writeText(text())
-              .then(() => setMessage("Selected entries copied."))
-              .catch(() =>
-                setMessage(
-                  "Clipboard access failed. Select and copy the text manually.",
-                ),
-              );
-          }}
-        >
-          Copy selected
-        </button>
-        <button
-          disabled={!selected.size || live}
-          onClick={() => {
-            const url = URL.createObjectURL(
-              new Blob([text()], { type: "text/plain;charset=utf-8" }),
-            );
-            const a = document.createElement("a");
-            a.href = url;
-            a.download = "hostboard-logs.txt";
-            a.click();
-            setTimeout(() => URL.revokeObjectURL(url), 1000);
-            setMessage("Selected displayed entries downloaded.");
-          }}
-        >
-          Download selected
-        </button>
+      <div className="log-display-options">
+        <label>
+          <input
+            type="checkbox"
+            checked={wrap}
+            onChange={(e) => {
+              setWrap(e.target.checked);
+              savePreference("logWrap", e.target.checked);
+            }}
+          />{" "}
+          Wrap lines
+        </label>
+        <label>
+          Timestamp display{" "}
+          <select
+            aria-label="Timestamp display"
+            value={zone}
+            onChange={(e) => {
+              setZone(e.target.value);
+              savePreference("logZone", e.target.value);
+            }}
+          >
+            <option value="local">Local time</option>
+            <option value="utc">UTC</option>
+          </select>
+        </label>
       </div>
+      {(dirty ||
+        search !== filter.search ||
+        sensitive !== filter.caseSensitive ||
+        stream !== filter.stream) && (
+        <p className="notice" role="status">
+          Controls edited. Choose Show logs to apply them; results below still
+          use the last queried window.
+        </p>
+      )}
+      <p className="small muted">
+        Query window: {new Date(window.after).toLocaleString()} —{" "}
+        {live
+          ? "now (live)"
+          : new Date(followEnd ?? window.before).toLocaleString()}
+      </p>
+      <details className="log-export">
+        <summary>
+          {entries.length} displayed · {selected.size} selected · Selection &
+          export
+        </summary>
+        <div className="log-selection">
+          <span>
+            {entries.length} displayed · {selected.size} selected
+          </span>
+          <button
+            disabled={!entries.length || live}
+            onClick={() => setSelected(new Set(entries.map((_, i) => i)))}
+          >
+            Select displayed
+          </button>
+          <button
+            disabled={!selected.size}
+            onClick={() => setSelected(new Set())}
+          >
+            Clear selection
+          </button>
+          <button
+            disabled={!selected.size || live}
+            onClick={() => {
+              void navigator.clipboard
+                .writeText(text())
+                .then(() => setMessage("Selected entries copied."))
+                .catch(() =>
+                  setMessage(
+                    "Clipboard access failed. Select and copy the text manually.",
+                  ),
+                );
+            }}
+          >
+            Copy selected
+          </button>
+          <button
+            disabled={!selected.size || live}
+            onClick={() => {
+              const url = URL.createObjectURL(
+                new Blob([text()], { type: "text/plain;charset=utf-8" }),
+              );
+              const a = document.createElement("a");
+              a.href = url;
+              a.download = "hostboard-logs.txt";
+              a.click();
+              setTimeout(() => URL.revokeObjectURL(url), 1000);
+              setMessage("Selected displayed entries downloaded.");
+            }}
+          >
+            Download selected
+          </button>
+        </div>
+      </details>
       {message && (
         <p role="status" className="small">
           {message}
@@ -704,8 +941,9 @@ export function LogExplorer({
       )}
       <div
         ref={viewport}
-        className="log-viewport"
+        className={`log-viewport ${wrap ? "wrap-lines" : "no-wrap"}`}
         tabIndex={0}
+        role="region"
         aria-label="Log entries"
         onWheel={() => {
           if (live) stop();
@@ -720,7 +958,7 @@ export function LogExplorer({
       >
         {entries.map((entry, i) => (
           <div
-            className={`log-entry ${level(entry.text)}`}
+            className={`log-entry ${level(entry.text)} ${selected.has(i) ? "selected" : ""}`}
             key={`${i}:${entry.time}`}
           >
             <input
@@ -736,7 +974,20 @@ export function LogExplorer({
                 })
               }
             />
-            <time>{entry.time}</time>
+            <time dateTime={entry.time} title={entry.time}>
+              {zone === "utc"
+                ? entry.time.replace("T", " ").replace("Z", " UTC")
+                : new Date(entry.time).toLocaleString(undefined, {
+                    year: "numeric",
+                    month: "2-digit",
+                    day: "2-digit",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    second: "2-digit",
+                    fractionalSecondDigits: 3,
+                    timeZoneName: "short",
+                  })}
+            </time>
             <span className={`log-stream ${entry.stream}`}>{entry.stream}</span>
             <div className="log-message">
               <pre>
@@ -745,6 +996,9 @@ export function LogExplorer({
                   query={filter.search}
                   sensitive={filter.caseSensitive}
                 />
+                {entry.truncated && (
+                  <span className="muted"> [entry truncated]</span>
+                )}
               </pre>
               <Structured text={entry.text} />
             </div>
@@ -767,8 +1021,8 @@ export function LogExplorer({
       {result && (
         <p className="small muted">
           {result.notice} Each query scans at most 2 MiB / 5,000 records and
-          returns at most 500 entries / 512 KiB. Pause before selecting or
-          copying entries.
+          returns at most 500 entries / 512 KiB. Older logs may have rotated
+          away. Pause before selecting or copying entries.
         </p>
       )}
     </section>

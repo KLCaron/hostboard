@@ -10,7 +10,7 @@ export interface Display {
   refreshSeconds: number;
   temperature: "C" | "F";
   range: "15m" | "1h" | "6h" | "24h";
-  landing: "overview" | "servers" | "services" | "issues" | "settings";
+  landing: "overview" | "servers" | "services" | "logs" | "issues" | "settings";
   compact: boolean;
 }
 export const displayDefaults: Display = {
@@ -29,7 +29,7 @@ function valid(v: unknown): v is Display {
     x.refreshSeconds <= 300 &&
     ["C", "F"].includes(x.temperature) &&
     ["15m", "1h", "6h", "24h"].includes(x.range) &&
-    ["overview", "servers", "services", "issues", "settings"].includes(
+    ["overview", "servers", "services", "logs", "issues", "settings"].includes(
       x.landing,
     ) &&
     typeof x.compact === "boolean"

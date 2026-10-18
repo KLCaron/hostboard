@@ -1,3 +1,5 @@
+import { LogsPage } from './Logs';
+import { RangeSelector } from './RangeSelector';
 import {
   Containers,
   HostDiagnostics,
@@ -30,6 +32,7 @@ import {
   X,
   Settings as SettingsIcon,
   Activity,
+  ScrollText,
 } from "lucide-react";
 import { Area, AreaChart, ResponsiveContainer, Tooltip, YAxis } from "recharts";
 import type { Fleet, History, Host, Point, Range } from "./types";
@@ -831,6 +834,7 @@ function App() {
               overview: LayoutDashboard,
               servers: Server,
               services: Activity,
+              logs: ScrollText,
               issues: Bell,
               settings: SettingsIcon,
             }[value];
@@ -919,24 +923,8 @@ function App() {
             <>
               <div className="overview-range">
                 <span className="muted small">Chart time range</span>
-                <div
-                  className="range-picker"
-                  role="group"
-                  aria-label="Historical time range"
-                >
-                  {ranges.map((r) => (
-                    <button
-                      key={r}
-                      aria-pressed={range === r}
-                      onClick={() => {
-                        setRange(r);
-                        savePreference("range", r);
-                      }}
-                    >
-                      {r}
-                    </button>
-                  ))}
-                </div>
+                <RangeSelector value={range} short onChange={r => {if(r !== 'custom'){setRange(r);savePreference('range',r);}}}/>
+
               </div>
               {fleet ? (
                 <Dashboard
@@ -962,25 +950,8 @@ function App() {
                     sparkline shows peaks
                   </p>
                 </div>
-                <div
-                  className="range-picker"
-                  role="group"
-                  aria-label="Historical time range"
-                >
-                  {ranges.map((r) => (
-                    <button
-                      key={r}
-                      aria-pressed={range === r}
-                      className={range === r ? "active" : ""}
-                      onClick={() => {
-                        setRange(r);
-                        savePreference("range", r);
-                      }}
-                    >
-                      {r}
-                    </button>
-                  ))}
-                </div>
+                <RangeSelector value={range} short onChange={r => {if(r !== 'custom'){setRange(r);savePreference('range',r);}}}/>
+
               </section>
               {page === "servers" && (
                 <input
@@ -1039,6 +1010,7 @@ function App() {
               />
             </>
           )}
+          {page === "logs" && <LogsPage hosts={hosts}/>}
           {page === "issues" && (
             <Issues
               hosts={hosts}

@@ -1,3 +1,4 @@
+import { LogSettings } from './LogSettings';
 import { useEffect, useRef, useState } from "react";
 import type { Host } from "./types";
 import type { MonitorView } from "./monitor-types";
@@ -43,6 +44,7 @@ interface Config {
 const tabs = [
   "General",
   "Services",
+  "Log Sources",
   "Notifications",
   "Data & History",
   "System Status",
@@ -124,7 +126,7 @@ function GeneralFields({
             })
           }
         >
-          {["overview", "servers", "services", "issues", "settings"].map(
+          {["overview", "servers", "services", "logs", "issues", "settings"].map(
             (x) => (
               <option key={x}>{x}</option>
             ),
@@ -154,7 +156,7 @@ export function Settings({
   const display = useDisplay(),
     [personal, setPersonal] = useState(display),
     [scope, setScope] = useState("personal");
-  const [tab, setTab] = useState<(typeof tabs)[number]>("General"),
+  const [tab, setTab] = useState<(typeof tabs)[number]>(() => new URLSearchParams(location.hash.split("?")[1] ?? "").get("tab") === "logs" ? "Log Sources" : "General"),
     [session, setSession] = useState<{ admin: boolean; configured: boolean; mode?: string }>(),
     [config, setConfig] = useState<Config>(),
     [draft, setDraft] = useState<Values>(),
@@ -838,6 +840,7 @@ export function Settings({
           )}
         </section>
       )}
+      {tab === "Log Sources" && <LogSettings hosts={hosts} data={data} admin={!!session?.admin}/>}
       {tab === "Notifications" && (
         <>
           <OperationalStatus data={data} error={error} />

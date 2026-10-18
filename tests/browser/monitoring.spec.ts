@@ -1,7 +1,7 @@
 import {test,expect} from '@playwright/test';
 import { serviceGroup, activeIssueCount } from '../../src/issues';
 
-test('five sections, real checks and groupings, expanded trends, settings and compact overview',async({page,request},info)=>{
+test('six sections, real checks and groupings, expanded trends, settings and compact overview',async({page,request},info)=>{
   const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
   const response=await request.get('/api/monitor');expect(response.ok()).toBe(true);
   const monitor=await response.json();
@@ -12,8 +12,8 @@ test('five sections, real checks and groupings, expanded trends, settings and co
   expect((await request.get('/api/monitor?before=oops')).status()).toBe(400);
   await page.goto('/');
   const nav=page.getByRole('navigation',{name:'Main navigation'});
-  await expect(nav.getByRole('button')).toHaveCount(5);
-  for(const name of ['Overview','Servers','Services','Issues','Settings']) await expect(nav.getByRole('button',{name,exact:true})).toBeInViewport();
+  await expect(nav.getByRole('button')).toHaveCount(6);
+  for(const name of ['Overview','Servers','Services','Logs','Issues','Settings']) await expect(nav.getByRole('button',{name,exact:true})).toBeInViewport();
   await expect(page.getByRole('region',{name:'Monitoring health summary'})).toContainText(`${monitor.checks.filter((c:any)=>c.state==='up').length}/${monitor.checks.length} services healthy`);
   await expect(page.getByRole('region',{name:'Monitoring health summary'})).toContainText(`${activeIssueCount(fleet.hosts,monitor)} active issue`);
   await expect(page.locator('.check-card')).toHaveCount(0);

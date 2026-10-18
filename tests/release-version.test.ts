@@ -82,6 +82,7 @@ test("public setup wrapper and generated environment select this release instead
       `HOSTBOARD_IMAGE=ghcr.io/klcaron/hostboard:${version}\n`,
     ),
   );
+  assert(readFileSync("Dockerfile", "utf8").includes(`ARG VERSION=${version}\n`));
   for (const file of ["compose.yaml", ".env.example"])
     assert(
       readFileSync(file, "utf8").includes(
