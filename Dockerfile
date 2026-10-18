@@ -18,7 +18,9 @@ LABEL org.opencontainers.image.source="https://github.com/KLCaron/hostboard" \
 ENV NODE_ENV=production PORT=8088
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev && npm cache clean --force
+RUN npm ci --omit=dev && npm cache clean --force \
+    && rm -rf /usr/local/lib/node_modules/npm /opt/yarn-* \
+    && rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/yarn /usr/local/bin/yarnpkg
 COPY --from=build /app/dist ./dist
 COPY LICENSE THIRD_PARTY_NOTICES.txt ./
 RUN mkdir -p /app/data /app/private /app/config && chown node:node /app/data /app/private /app/config

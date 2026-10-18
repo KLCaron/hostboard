@@ -2,7 +2,7 @@
 
 ## Distribution
 
-Stable release image: `ghcr.io/klcaron/hostboard:0.5.0`, Linux amd64/arm64. Each `vX.Y.Z` Git tag must match `package.json`. Publishing runs tests before building, and refuses an existing version tag. Do not move Git tags or republish an existing version. GHCR allows administrators to change tags, so use the published **sha256 manifest digest** for immutable deployments. The GitHub Release records that digest; build metadata/SBOM/provenance are attached to the image. No moving `latest` tag is published. Only reviewed stable semantic versions are released.
+Stable release image: `ghcr.io/klcaron/hostboard:0.5.0`, Linux amd64/arm64. Each `vX.Y.Z` Git tag must match `package.json`. Publishing runs tests before building, and refuses an existing version tag. Do not move Git tags or republish an existing version. GHCR allows administrators to change tags, so use the published **sha256 manifest digest** for immutable deployments. The GitHub Release records that digest; build metadata/SBOM/provenance are attached to the image. No moving `latest` tag is published. Maintainers may dispatch a verified `candidate-<commit>` image for pre-release acceptance; it is not a stable release. Only reviewed stable semantic versions are released.
 
 Use `HOSTBOARD_IMAGE=ghcr.io/klcaron/hostboard@sha256:...` in `.env` to pin the complete multi-platform release. Keep a copy of the selected source release alongside your deployment files to satisfy source availability and recover the matching helpers. No automatic updater is installed.
 

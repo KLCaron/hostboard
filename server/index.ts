@@ -250,7 +250,7 @@ if (!Number.isInteger(port) || port < 1024 || port > 65535)
 // Same-host proxies can use localhost while browsers on the LAN use the
 // configured private address. Never bind all interfaces to enable both.
 const addresses =
-  bind === "127.0.0.1" || bind === "::1" ? [bind] : [bind, "127.0.0.1"];
+  ["127.0.0.1", "::1", "0.0.0.0"].includes(bind) ? [bind] : [bind, "127.0.0.1"];
 let listening = 0;
 const servers = addresses.map((address) =>
   app.listen(port, address, () => {

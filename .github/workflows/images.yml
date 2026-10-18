@@ -2,6 +2,7 @@ name: Release images
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
 permissions:
   contents: read
 concurrency:
@@ -26,9 +27,14 @@ jobs:
         id: version
         shell: bash
         run: |
-          version="${GITHUB_REF_NAME#v}"
-          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1
-          [[ "$(node -p "require('./package.json').version")" == "$version" ]] || exit 1
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            [[ "$GITHUB_REF_NAME" == main ]] || exit 1
+            version="candidate-${GITHUB_SHA:0:12}"
+          else
+            version="${GITHUB_REF_NAME#v}"
+            [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1
+            [[ "$(node -p "require('./package.json').version")" == "$version" ]] || exit 1
+          fi
           echo "value=$version" >> "$GITHUB_OUTPUT"
           # Released version tags are never overwritten, including workflow reruns.
           if docker manifest inspect "ghcr.io/klcaron/hostboard:$version" >/dev/null 2>&1; then
@@ -56,5 +62,10 @@ jobs:
           cache-to: type=gha,mode=max
           provenance: mode=max
           sbom: true
+      - name: Verify amd64 and arm64 runtime libraries
+        run: |
+          for arch in amd64 arm64; do
+            docker run --rm --platform "linux/$arch" --entrypoint node "ghcr.io/klcaron/hostboard:${{ steps.version.outputs.value }}" -e "require('argon2'); require('node:sqlite'); console.log(process.arch)"
+          done
       - name: Record immutable digest
         run: echo 'ghcr.io/klcaron/hostboard@${{ steps.image.outputs.digest }}' >> "$GITHUB_STEP_SUMMARY"

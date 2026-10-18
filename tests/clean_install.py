@@ -121,6 +121,7 @@ def main():
             ip = compose('exec', '-T', 'fixture', 'node', '-e',
                          "require('dns').lookup('fixture',(e,a)=>{if(e)process.exit(1);console.log(a)})", capture=True).stdout.strip()
             answers['targets'][0]['addresses'] = [ip]
+            answers['targets'].append({'host':ip, 'port':19999, 'addresses':[ip]})
             answer_file = root / 'answers.json'
             answer_file.write_text(json.dumps(answers))
             answer_file.chmod(0o600)
@@ -141,7 +142,7 @@ def main():
             login()
             code,fleet=api('/api/fleet'); assert code==200 and fleet['hosts'][0]['status']=='online',fleet
             config=api('/api/admin/config')[1]
-            check={'name':'Acceptance check','hostId':'server-a','group':'Applications','type':'http','url':'http://fixture:19999/health','notify':False,'failureThreshold':1,'intervalSeconds':10}
+            check={'name':'Acceptance check','hostId':'server-a','group':'Applications','type':'http','url':f'http://{ip}:19999/health','notify':False,'failureThreshold':1,'intervalSeconds':10}
             assert api('/api/admin/checks',{'revision':config['revision'],'definition':check,'enabled':True},'POST',origin='https://evil.example')[0] == 403
             code,added=api('/api/admin/checks',{'revision':config['revision'],'definition':check,'enabled':True},'POST');assert code==201,added
             check_id=added['id']

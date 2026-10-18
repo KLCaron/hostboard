@@ -232,9 +232,9 @@ export class Agent {
           this.config,
           error instanceof Error && error.name === 'TimeoutError'
             ? 'Agent request timed out'
-            : error instanceof Error
+            : error instanceof Error && /^(Agent returned HTTP \d{3}$|Node selector is ambiguous|Configured node was not found)/.test(error.message)
               ? error.message
-              : 'Agent unavailable',
+              : 'Agent connection failed. Check the endpoint, DNS, firewall and Agent access permissions.',
           this.snapshot?.host.lastSeen,
         ),
       )
