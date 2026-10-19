@@ -609,3 +609,73 @@ test("successful capability refreshes and private token handling retain the orig
   delete process.env.HB_FIXTURE_TOKEN;
   await assert.rejects(trust.destination(f.url), /authentication/);
 });
+
+test("moving a registered machine to another approved Agent requires a fresh, unexpired test and keeps its ID", async (t) => {
+  const other = await serverFixture();
+  t.after(other.close);
+  const f = await serverFixture("cloudflare", true, [other.url]);
+  t.after(f.close);
+  await f.registry.fleet();
+  const old = f.registry.records()[0];
+  const connection = { name: "Moved machine", url: other.url, node: old.guid! };
+  assert.equal(
+    (
+      await f.call(
+        "/" + old.id,
+        {
+          revision: f.store.revision(),
+          connection,
+          enabled: true,
+          groupId: null,
+        },
+        "PUT",
+      )
+    ).status,
+    400,
+  );
+  f.resetLimit();
+  const tested = await f.call("/test", { id: old.id, connection });
+  assert.equal(tested.status, 200);
+  const now = Date.now();
+  const mock = t.mock.method(Date, "now", () => now + 600_001);
+  assert.equal(
+    (
+      await f.call(
+        "/" + old.id,
+        {
+          revision: f.store.revision(),
+          connection,
+          enabled: true,
+          groupId: null,
+          testId: tested.body.testId,
+        },
+        "PUT",
+      )
+    ).status,
+    400,
+  );
+  mock.mock.restore();
+  f.resetLimit();
+  const fresh = await f.call("/test", { id: old.id, connection });
+  assert.equal(fresh.status, 200);
+  assert.equal(
+    (
+      await f.call(
+        "/" + old.id,
+        {
+          revision: f.store.revision(),
+          connection,
+          enabled: true,
+          groupId: null,
+          testId: fresh.body.testId,
+        },
+        "PUT",
+      )
+    ).status,
+    200,
+  );
+  assert.equal(f.registry.records()[0].id, old.id);
+  assert.equal(f.registry.records()[0].guid, old.guid);
+  assert.equal(f.registry.records()[0].url, other.url);
+  assert.equal((await f.registry.current(old.id)).status, "online");
+});

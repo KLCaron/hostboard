@@ -18,6 +18,7 @@ import type { HostConfig } from "../server/config.js";
 export async function serverFixture(
   mode: "cloudflare" | "local" = "cloudflare",
   seeded = false,
+  approvedOrigins: string[] = [],
 ) {
   const metadata = JSON.parse(
     readFileSync(
@@ -96,7 +97,9 @@ export async function serverFixture(
         node: n.nm,
       }))
     : [];
-  const trust = new AgentTrust([{ url, addresses: ["127.0.0.1"] }]);
+  const trust = new AgentTrust(
+    [url, ...approvedOrigins].map((url) => ({ url, addresses: ["127.0.0.1"] })),
+  );
   const registry = new Servers(store, trust, seed);
   const { privateKey, publicKey } = await generateKeyPair("RS256");
   const jwk = await exportJWK(publicKey);
