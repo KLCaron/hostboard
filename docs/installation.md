@@ -25,7 +25,7 @@ DATA_DIR="$HOME/hostboard-data"
 install -d -m 700 "$DATA_DIR"
 docker run --rm -it --user "$(id -u):$(id -g)" \
   --volume "$PWD:/setup" --volume "$DATA_DIR:$DATA_DIR" --entrypoint node \
-  ghcr.io/klcaron/hostboard:0.7.0 dist/server/server/setup.js --directory /setup
+  ghcr.io/klcaron/hostboard:0.7.1 dist/server/server/setup.js --directory /setup
 ```
 
 Enter the exact absolute value of `DATA_DIR` at the persistent data directory prompt. Then run `./scripts/setup.sh --check` and `docker compose up -d --wait` normally. Use a path without spaces or shell syntax. This flow was verified with external SQLite storage, an unavailable Agent, and container recreation. Existing installations should stop Hostboard and retain a consistent backup before moving data or changing `HOSTBOARD_DATA_DIR`.
