@@ -123,6 +123,51 @@ warning; this maintenance does not change warning thresholds or restructure the
 application. No version tag, release publication, or production rollout is part
 of this pass.
 
+## Dependabot freeze policy
+
+The weekly schedules for npm, GitHub Actions and Docker remain in place, along
+with the npm five-PR limit. Each ecosystem allows only routine minor and patch
+updates using `allow.update-types`; there are no blanket `ignore` rules. These
+allow rules do not restrict security updates, so security fixes requiring major
+upgrades remain eligible. Groups apply to version updates: npm production and
+development dependencies are separate, Vite and `@vitejs/plugin-react` retain
+their coordinated `vite` group, and Actions and Docker each have a group.
+Grouping does not guarantee compatibility: review and both Verify jobs
+(`application` and `clean-install`) must pass before manual merging. Automatic
+merging is not enabled by this change.
+
+At the configuration review, PRs [#1](https://github.com/KLCaron/hostboard/pull/1),
+[#2](https://github.com/KLCaron/hostboard/pull/2) and
+[#7](https://github.com/KLCaron/hostboard/pull/7) were still open and unmerged.
+They remain deferred: retain Node 24 LTS, matching Node 24 types and
+concurrently 9. Dependabot may close obsolete major-update PRs after processing
+the policy; closure is acceptable and does not authorize an upgrade.
+
+Repository settings need an administrator check. The available GitHub CLI
+account has read-only repository access; the alert/security-update status APIs
+return 404, the dependency-graph SBOM endpoint returns 404, and the manifest
+query returns no manifests. These results do not establish that security
+features are enabled. In **Settings → Advanced Security**, verify or enable
+**Dependency graph**, **Dependabot alerts** and **Dependabot security updates**.
+Settings are outside `dependabot.yml` and require an appropriately authorized
+GitHub account. The repository is public, so features shown as always enabled
+need no change.
+
+The main branch currently reports `protected: false` and no repository rulesets
+are listed. An administrator must add a main-branch protection rule or active
+ruleset requiring pull requests and the `application` and `clean-install`
+status checks, with bypasses disabled where supported. Leave automatic merging
+disabled. The existing Verify workflow is unchanged; this configuration change
+must also pass it before merging.
+
+The policy follows GitHub's current
+[Dependabot options reference](https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference)
+and is validated against the current
+[Dependabot v2 JSON schema](https://json.schemastore.org/dependabot-2.0.json).
+See GitHub's instructions for
+[security updates](https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/secure-your-dependencies/configure-security-updates)
+and [alerts](https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/secure-your-dependencies/configure-dependabot-alerts).
+
 ## Upstream review references
 
 - [Node release status](https://nodejs.org/en/about/previous-releases) and

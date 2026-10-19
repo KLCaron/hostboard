@@ -1,20 +1,59 @@
+# yaml-language-server: $schema=https://json.schemastore.org/dependabot-2.0.json
 version: 2
+# Freeze routine major upgrades. allow.update-types affects version updates only;
+# security updates (including major fixes) remain eligible through GitHub settings.
 updates:
   - package-ecosystem: npm
     directory: /
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    allow:
+      - dependency-name: '*'
+        update-types:
+          - version-update:semver-minor
+          - version-update:semver-patch
     groups:
+      # Keep this coordinated group ahead of the general development group.
       vite:
         patterns:
           - vite
           - '@vitejs/plugin-react'
+        update-types: [minor, patch]
+      production:
+        dependency-type: production
+        patterns: ['*']
+        update-types: [minor, patch]
+      development:
+        dependency-type: development
+        patterns: ['*']
+        exclude-patterns:
+          - vite
+          - '@vitejs/plugin-react'
+        update-types: [minor, patch]
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    allow:
+      - dependency-name: '*'
+        update-types:
+          - version-update:semver-minor
+          - version-update:semver-patch
+    groups:
+      actions:
+        patterns: ['*']
+        update-types: [minor, patch]
   - package-ecosystem: docker
     directory: /
     schedule:
       interval: weekly
+    allow:
+      - dependency-name: '*'
+        update-types:
+          - version-update:semver-minor
+          - version-update:semver-patch
+    groups:
+      docker:
+        patterns: ['*']
+        update-types: [minor, patch]
