@@ -32,15 +32,20 @@ image/configuration/database procedure in [operations](operations.md).
 | --- | --- | --- |
 | [#1: Node 26 Alpine](https://github.com/KLCaron/hostboard/pull/1) | Defer; leave open | Both current PR checks passed, but retain the pinned Node 24 LTS base. Node 26 is still Current at review time, introduces V8/Undici changes and removed APIs, and changes the runtime underneath native argon2 and SQLite. No runtime migration is needed for this freeze. Revisit with matching types and the full release checks after LTS evaluation. |
 | [#2: Node 26 types](https://github.com/KLCaron/hostboard/pull/2) | Defer with #1; leave open | Application checks passed; old clean-install failure was shared test infrastructure. Retain `@types/node` 24.19.2 so checks describe the deployed Node 24 API rather than permitting Node 26-only APIs. |
-| [#3: Vite 8.3.4](https://github.com/KLCaron/hostboard/pull/3) | Incorporate in combined maintenance PR; supersede original | Rolldown/Oxc replace Rollup/esbuild. Hostboard has a small standard React/Tailwind configuration and no custom Babel/compiler/SSR integration to migrate. Preserve Vite 7's browser targets explicitly instead of silently raising them. |
-| [#4: TypeScript 7.0.2](https://github.com/KLCaron/hostboard/pull/4) | Incorporate with compatibility fix; supersede original | Native compiler/platform binaries replace the old JS compiler; no stable compiler API is supplied. Hostboard uses the CLI, not a compiler API integration. Add `src/vite-env.d.ts` referencing `vite/client` to declare CSS/asset imports; retain strict checks and existing server emit settings. |
-| [#5: React plugin 6.1.2](https://github.com/KLCaron/hostboard/pull/5) | Incorporate with Vite 8; supersede original | Requires peer `vite ^8.0.0`; updating it alone against Vite 7 fails `npm ci`. No React Compiler or custom Babel options are enabled. Group future Vite/plugin Dependabot updates. |
-| [#6: Lucide React 1.57.0](https://github.com/KLCaron/hostboard/pull/6) | Incorporate in combined maintenance PR; supersede original | React 19 is supported. The v1 migration removes brand icons; Hostboard imports none of those icons. Existing exports compile and rendered navigation/interactions receive browser coverage. |
+| [#3: Vite 8.3.4](https://github.com/KLCaron/hostboard/pull/3) | Integrate in coordinated PR #3 | Rolldown/Oxc replace Rollup/esbuild. Hostboard has a small standard React/Tailwind configuration and no custom Babel/compiler/SSR integration to migrate. Preserve Vite 7's browser targets explicitly instead of silently raising them. |
+| [#4: TypeScript 7.0.2](https://github.com/KLCaron/hostboard/pull/4) | Integrate with compatibility fix through #3 | Native compiler/platform binaries replace the old JS compiler; no stable compiler API is supplied. Hostboard uses the CLI, not a compiler API integration. Add `src/vite-env.d.ts` referencing `vite/client` to declare CSS/asset imports; retain strict checks and existing server emit settings. |
+| [#5: React plugin 6.1.2](https://github.com/KLCaron/hostboard/pull/5) | Integrate with Vite 8 through #3 | Requires peer `vite ^8.0.0`; updating it alone against Vite 7 fails `npm ci`. No React Compiler or custom Babel options are enabled. Group future Vite/plugin Dependabot updates. |
+| [#6: Lucide React 1.57.0](https://github.com/KLCaron/hostboard/pull/6) | Integrate in coordinated PR #3 | React 19 is supported. The v1 migration removes brand icons; Hostboard imports none of those icons. Existing exports compile and rendered navigation/interactions receive browser coverage. |
 
 Versions are locked to the reviewed PR versions, including Lucide 1.57.0.
 All production npm package versions and integrity hashes remain identical to the
 checkpoint. Third-party notices were regenerated for the new build dependency
 tree; all 338 locked package licenses pass the existing review gate.
+
+The final coordinated tree preserves all four original dependency commits in its
+ancestry. The jointly verified lockfile resolves their conflicts, and PR #3
+carries the complete compatibility changes through the existing Verify workflow.
+The other three upgrade PRs are incorporated by the same merge.
 
 ## Shared CI failures and corrections
 
