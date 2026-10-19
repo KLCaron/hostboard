@@ -145,6 +145,8 @@ export function empty(config: HostConfig, error: string, lastSeen: string | null
 export class Agent {
   private metadata?: Meta;
   private stopped = new AbortController();
+  private successfulRequests = 0;
+  private lastRequestError: unknown;
   lastCommunication: string | null = null;
   stop() { this.stopped.abort(); }
 
@@ -202,10 +204,11 @@ export class Agent {
       const response = await pinnedRequest(url, token ? { Authorization: `Bearer ${token}` } : {}, AbortSignal.any([AbortSignal.timeout(6000), this.stopped.signal]), address, (path.endsWith('/charts') ? 16 : 4) * 1024 * 1024);
       if (!response.ok) throw new Error(`Agent returned HTTP ${response.status}`);
       const value = await response.json();
+      this.successfulRequests++;
       this.lastCommunication = new Date().toISOString();
       return value;
     });
-    try { return await (path.endsWith('/charts') ? chartSlot(run) : run()); } finally { const next = this.requestQueue.shift(); if (next) next(); else this.activeRequests--; }
+    try { return await (path.endsWith('/charts') ? chartSlot(run) : run()); } catch (e) { this.lastRequestError = e; throw e; } finally { const next = this.requestQueue.shift(); if (next) next(); else this.activeRequests--; }
   }
   private metaPending?: Promise<Meta>;
   private async meta(): Promise<Meta> {
@@ -284,6 +287,7 @@ export class Agent {
     return this.pending;
   }
   private async collect(): Promise<Host> {
+    const successfulBefore = this.successfulRequests;
     const meta = await this.meta(),
       now = Date.now() / 1000;
     const host = empty(this.config, '');
@@ -418,6 +422,7 @@ export class Agent {
     } catch {
       host.warnings.push('Netdata alerts unavailable');
     }
+    if (this.successfulRequests === successfulBefore) throw this.lastRequestError || Error('Agent connection failed');
     return host;
   }
   async history(range: Range): Promise<History> {

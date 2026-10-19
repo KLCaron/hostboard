@@ -223,7 +223,13 @@ def main():
                 if status['incidents']:break
                 time.sleep(1)
             assert status['incidents'],status
-            assert api('/api/fleet')[1]['hosts'][0]['status']=='offline'
+            # Fleet responses can initially show the bounded pending-refresh placeholder.
+            # Wait for the independent request timeout to establish definitive offline state.
+            for _ in range(20):
+                unavailable=api('/api/fleet')[1]['hosts'][0]
+                if unavailable['status']=='offline': break
+                time.sleep(0.5)
+            assert unavailable['status']=='offline',unavailable
             run('bash','scripts/manage.sh','backup','./backups/with-incident')
             run('bash','scripts/manage.sh','rollback','./backups/with-incident')
             login()
