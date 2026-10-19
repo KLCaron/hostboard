@@ -144,6 +144,7 @@ export function empty(config: HostConfig, error: string, lastSeen: string | null
 }
 export class Agent {
   private metadata?: Meta;
+  private metadataRefreshAt = 0;
   private stopped = new AbortController();
   private successfulRequests = 0;
   private lastRequestError: unknown;
@@ -211,20 +212,28 @@ export class Agent {
     try { return await (path.endsWith('/charts') ? chartSlot(run) : run()); } catch (e) { this.lastRequestError = e; throw e; } finally { const next = this.requestQueue.shift(); if (next) next(); else this.activeRequests--; }
   }
   private metaPending?: Promise<Meta>;
-  private async meta(): Promise<Meta> {
-    if (this.metadata && Date.now() - this.metadata.time < 300_000) return this.metadata;
+  private async meta(node?: NodeInfo): Promise<Meta> {
+    // Node liveness is checked on every poll. A reconnect can also replace the
+    // chart instances even when the physical machine GUID stays unchanged.
+    if (node && this.metadata && node.state !== this.metadata.node.state)
+      this.metadataRefreshAt = 0;
+    if (this.metadata && Date.now() < this.metadataRefreshAt)
+      return node ? { ...this.metadata, node } : this.metadata;
     if (this.metaPending) return this.metaPending;
-    this.metaPending = this.fetchMeta().finally(() => { this.metaPending = undefined; });
+    this.metaPending = this.fetchMeta(node).finally(() => { this.metaPending = undefined; });
     return this.metaPending;
   }
-  private async fetchMeta(): Promise<Meta> {
-    if (this.metadata && Date.now() - this.metadata.time < 300_000) return this.metadata;
+  private async selectedNode(): Promise<NodeInfo> {
     const nodes = await this.nodeList();
     const matches = nodes.filter(n => [n.mg, n.nd, n.nm].includes(this.config.node));
     if (matches.length > 1)
       throw new Error('Node selector is ambiguous; configure a machine GUID instead');
     const node = matches[0];
     if (!node) throw new Error('Configured node was not found on this Agent');
+    return node;
+  }
+  private async fetchMeta(selected?: NodeInfo): Promise<Meta> {
+    const node = selected || await this.selectedNode();
     const [chartResult, contextResult] = await Promise.allSettled([
       this.request(`/host/${encodeURIComponent(node.mg)}/api/v1/charts`),
       this.request('/api/v3/contexts', { nodes: node.mg }),
@@ -248,6 +257,8 @@ export class Agent {
     };
     this.onDiscovery?.(discovery(metadata));
     this.metadata = metadata;
+    // Failed/partial startup catalogs are provisional, never cached for five minutes.
+    this.metadataRefreshAt = Date.now() + (warnings.length || node.state !== 'reachable' ? 30_000 : 300_000);
     return metadata;
   }
   private async data(meta: Meta, context: string, seconds: number, points: number, extra: Record<string, string> = {}): Promise<Table> {
@@ -270,13 +281,10 @@ export class Agent {
     if (this.snapshot && Date.now() - this.snapshot.time < 8000) return this.snapshot.host;
     if (this.pending) return this.pending;
     this.pending = this.collect()
-      .catch((error) =>
-        empty(
-          this.config,
-          agentDiagnostic(error).message,
-          this.snapshot?.host.lastSeen,
-        ),
-      )
+      .catch((error) => {
+        this.metadataRefreshAt = 0;
+        return empty(this.config, agentDiagnostic(error).message, this.snapshot?.host.lastSeen);
+      })
       .then((host) => {
         this.snapshot = { host, time: Date.now() };
         return host;
@@ -288,7 +296,8 @@ export class Agent {
   }
   private async collect(): Promise<Host> {
     const successfulBefore = this.successfulRequests;
-    const meta = await this.meta(),
+    const node = await this.selectedNode();
+    const meta = await this.meta(node),
       now = Date.now() / 1000;
     const host = empty(this.config, '');
     host.error = null;
@@ -314,7 +323,7 @@ export class Agent {
       return latest(id ? instances?.get(id) : instances?.values().next().value, now)?.values || {};
     };
     const cpuSample = latest(tables.get('system.cpu')?.values().next().value, now);
-    host.status = cpuSample ? (meta.node.state === 'reachable' ? 'online' : 'stale') : 'stale';
+    host.status = cpuSample ? (node.state === 'reachable' ? 'online' : 'stale') : 'stale';
     host.lastSeen = cpuSample
       ? new Date(cpuSample.time * 1000).toISOString()
       : this.snapshot?.host.lastSeen || null;
@@ -362,9 +371,16 @@ export class Agent {
     }
     host.disks.sort((a, b) => a.mount.localeCompare(b.mount));
     host.sensors.sort((a, b) => (b.value ?? -Infinity) - (a.value ?? -Infinity));
-    host.dockerAvailable = [...(tables.get('docker.container_state')?.values() || [])].some(
-      (samples) => !!latest(samples, now),
+    const docker = tables.get('docker.container_state');
+    const freshDocker = [...(docker?.entries() || [])].filter(([, samples]) => latest(samples, now));
+    // Fresh dimensions without matching chart labels cannot establish a count.
+    // This occurs while collectors start or recreate instances after a reboot.
+    host.dockerAvailable = freshDocker.length > 0 && freshDocker.every(([id]) =>
+      meta.charts[id]?.context === 'docker.container_state' && !!meta.charts[id].chart_labels.container_name &&
+      Object.values(latest(docker?.get(id), now)!.values).some(value => value !== null && value > 0.5),
     );
+    if (freshDocker.length && !host.dockerAvailable)
+      host.warnings.push('Docker instance metadata incomplete; container count unavailable');
     const containers = new Map<string, Container>();
     for (const chart of Object.values(meta.charts).filter(
       (c) => c.context === 'docker.container_state',
@@ -372,6 +388,7 @@ export class Agent {
       const labels = chart.chart_labels || {},
         name = labels.container_name;
       if (!name) continue;
+      if (containers.has(name) && !latest(docker?.get(chart.id), now)) continue;
       const v = values(chart.context, chart.id),
         state =
           Object.entries(v)
@@ -422,6 +439,8 @@ export class Agent {
     } catch {
       host.warnings.push('Netdata alerts unavailable');
     }
+    if (host.status !== 'online' || host.warnings.length || !host.dockerAvailable)
+      this.metadataRefreshAt = Math.min(this.metadataRefreshAt, Date.now() + 30_000);
     if (this.successfulRequests === successfulBefore) throw this.lastRequestError || Error('Agent connection failed');
     return host;
   }

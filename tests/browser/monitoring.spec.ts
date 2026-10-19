@@ -99,3 +99,19 @@ test('monitor request failure marks cached availability unknown and recovers',as
   await page.getByRole('button',{name:'Refresh',exact:true}).click();
   await expect(page.getByText('Monitoring updates unavailable. Previously observed states are unknown.')).not.toBeVisible();
 });
+
+test('Docker catalog gaps show unavailable and a later poll restores the running count',async({page,request})=>{
+  const fleet=await (await request.get('/api/fleet')).json();
+  const running=fleet.hosts.flatMap((h:any)=>h.containers).filter((c:any)=>c.state==='running').length;
+  expect(running).toBeGreaterThan(0);
+  let recovered=false;
+  await page.route('**/api/fleet',route=>route.fulfill({json:recovered?fleet:{...fleet,hosts:fleet.hosts.map((h:any)=>({...h,dockerAvailable:false,containers:[],warnings:['Docker instance metadata incomplete; container count unavailable']}))}}));
+  await page.goto('/');
+  const card=page.locator('.stat-card').filter({has:page.getByText('Containers running',{exact:true})});
+  await expect(card.locator('.stat-value')).toHaveText('—');
+  await expect(card).toContainText('Docker data unavailable');
+  recovered=true;
+  await page.getByRole('button',{name:'Refresh',exact:true}).click();
+  await expect(card.locator('.stat-value')).toContainText(String(running));
+  await expect(card).toContainText('Reported by Netdata Agents');
+});
