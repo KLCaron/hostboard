@@ -216,13 +216,27 @@ def main():
                 assert db.execute('pragma user_version').fetchone()[0]==4
                 assert db.execute('select count(*) from samples where generation=1').fetchone()[0]>=old_samples
             print(f'PASS: real preserved image/schema{previous_schema} to candidate image/schema4 migration with retained observations.',flush=True)
-            # Create a real outage/incident, observe unavailable Agent, then restore.
-            compose('stop','fixture')
+            # Establish recovery after the upgrade before creating a new outage.
+            # Historical incidents can already exist from lifecycle interruptions.
             for _ in range(25):
                 status=api('/api/monitor')[1]
-                if status['incidents']:break
+                current=next(c for c in status['checks'] if c['id']==check_id)
+                if current['state']=='up':break
                 time.sleep(1)
-            assert status['incidents'],status
+            assert current['state']=='up',status
+            previous_incidents={i['id'] for i in status['incidents']}
+            # Create a real outage/incident, observe unavailable Agent, then restore.
+            compose('stop','fixture')
+            outage=None
+            for _ in range(25):
+                status=api('/api/monitor')[1]
+                current=next(c for c in status['checks'] if c['id']==check_id)
+                outage=next((i for i in status['activeIncidents']
+                             if i['checkId']==check_id and i['id'] not in previous_incidents
+                             and i['id']==current['activeIncident']),None)
+                if current['state']=='down' and outage is not None:break
+                time.sleep(1)
+            assert current['state']=='down' and outage is not None,status
             # Fleet responses can initially show the bounded pending-refresh placeholder.
             # Wait for the independent request timeout to establish definitive offline state.
             for _ in range(20):
@@ -231,9 +245,30 @@ def main():
                 time.sleep(0.5)
             assert unavailable['status']=='offline',unavailable
             run('bash','scripts/manage.sh','backup','./backups/with-incident')
+            with sqlite3.connect(root/'backups/with-incident/monitor.sqlite') as db:
+                db.row_factory=sqlite3.Row
+                # Compare the actual checkpoint, not an earlier live list position.
+                saved_incidents={row['id']:dict(row) for row in db.execute('select * from incidents')}
+                saved_active=db.execute('select active from checks where id=?',(check_id,)).fetchone()['active']
+                assert saved_active==outage['id'],saved_incidents
+                assert saved_incidents[saved_active]['endedAt'] is None,saved_incidents
             run('bash','scripts/manage.sh','rollback','./backups/with-incident')
             login()
-            assert api('/api/monitor')[1]['incidents'][0]['id']==status['incidents'][0]['id']
+            restored_monitor=api('/api/monitor')[1]
+            restored_check=next(c for c in restored_monitor['checks'] if c['id']==check_id)
+            assert restored_check['activeIncident']==saved_active,restored_monitor
+            restored_incidents={i['id']:i for i in restored_monitor['incidents']}
+            assert saved_active in restored_incidents,restored_monitor
+            # New observations may append incidents or mark a restart gap. Every
+            # saved incident must still retain its identity and original evidence.
+            evidence=('id','checkId','generation','hostId','startedAt','detectedAt','reason')
+            with sqlite3.connect(external_data/'monitor.sqlite') as db:
+                db.row_factory=sqlite3.Row
+                for incident_id,saved in saved_incidents.items():
+                    row=db.execute('select * from incidents where id=?',(incident_id,)).fetchone()
+                    assert row is not None,{'missingIncident':incident_id}
+                    assert all(row[key]==saved[key] for key in evidence),{'saved':saved,'restored':dict(row)}
+            print(f'PASS: fresh outage {saved_active} remains active after rollback; all {len(saved_incidents)} checkpoint incidents retain identity and original evidence.',flush=True)
             run('bash','scripts/manage.sh','rollback','./backups/before-upgrade')
             login()
             restored=api('/api/admin/config')[1]

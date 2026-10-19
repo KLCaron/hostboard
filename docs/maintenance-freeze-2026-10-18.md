@@ -47,6 +47,10 @@ ancestry. The jointly verified lockfile resolves their conflicts, and PR #3
 carries the complete compatibility changes through the existing Verify workflow.
 The other three upgrade PRs are incorporated by the same merge.
 
+Dependabot subsequently opened [#7: concurrently 10](https://github.com/KLCaron/hostboard/pull/7).
+It is outside the initial six-PR review and remains deferred; this bounded pass
+retains concurrently 9.2.5.
+
 ## Shared CI failures and corrections
 
 - PRs #2, #3, and #6 failed the same `assert status['incidents']` in their old
@@ -64,6 +68,17 @@ The other three upgrade PRs are incorporated by the same merge.
   missing asset types without disabling side-effect import validation.
 - Vite 8 raises default browser targets. Explicit Chrome/Edge 107, Firefox 104,
   and Safari 16 targets preserve the existing build baseline.
+- The first post-merge main run passed the application job but exposed another
+  [clean-install assertion failure](https://github.com/KLCaron/hostboard/actions/runs/39187478339).
+  The outage wait accepted any existing historical incident, then rollback
+  compared `incidents[0]` from two live responses. Those responses can contain
+  different newest incidents as probes continue. The follow-up requires a
+  healthy check before the outage, a fresh active incident belonging to that
+  check, and the same active ID in the actual checkpoint and restored API. It
+  also verifies every checkpoint incident's ID, check/generation/host association,
+  onset, detection time, and original reason directly in the restored database.
+  This strengthens persistence coverage without changing monitoring, backup,
+  restore, or runtime code.
 
 ## Verification
 
