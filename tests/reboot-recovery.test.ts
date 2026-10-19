@@ -157,3 +157,27 @@ test('restart retains registered GUIDs during source outage and restores polling
   assert.ok(resolved.endedAt);
   assert.equal(store.db.prepare('SELECT COUNT(*) AS n FROM check_generations WHERE checkId=?').get('web')!.n, 1);
 });
+
+test('fresh Docker samples before chart labels never report a false zero count', async t => {
+  const source = http.createServer((req, res) => {
+    const u = new URL(req.url!, 'http://fixture');
+    let body: unknown;
+    if (u.pathname.endsWith('/nodes')) body = {nodes: [{mg: 'guid', nm: 'server', state: 'reachable'}]};
+    else if (u.pathname.endsWith('/charts')) body = {hostname: 'server', charts: {}};
+    else if (u.pathname.endsWith('/contexts')) body = {contexts: {'system.cpu': {}, 'docker.container_state': {}}};
+    else if (u.pathname.endsWith('/alerts')) body = {alerts: []};
+    else {
+      const id = u.searchParams.get('contexts') === 'system.cpu' ? 'user,cpu@server' : 'running,docker.web@server';
+      body = {summary: {nodes: [{mg: 'guid'}]}, result: {labels: ['time', id], data: [[Date.now() / 1000 - 1, 1]]}, view: {dimensions: {ids: [id]}}};
+    }
+    res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(body));
+  });
+  await new Promise<void>(r => source.listen(0, '127.0.0.1', r));
+  t.after(() => source.close());
+  const url = `http://127.0.0.1:${(source.address() as {port: number}).port}`;
+  const host = await new Agent({id: 'host', name: 'Host', url, node: 'guid'}, new AgentTrust([{url, addresses: ['127.0.0.1']}])).current();
+  assert.equal(host.status, 'online');
+  assert.equal(host.containers.length, 0);
+  assert.equal(host.dockerAvailable, false, 'empty chart catalog must not make fresh Docker samples look like zero containers');
+  assert.match(host.warnings.join(), /instance metadata incomplete/);
+});
