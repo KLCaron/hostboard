@@ -309,7 +309,7 @@ test("explicit mappings are host/generation scoped, support multiple sources, su
   );
   assert.equal(
     f.store.db.prepare("PRAGMA user_version").get()?.user_version,
-    3,
+    4,
   );
   assert(
     !JSON.stringify(

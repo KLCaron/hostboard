@@ -176,7 +176,7 @@ test("HB-004/005 migration preserves samples; revisions, renames, disable, archi
   assert.equal(
     (db.prepare("PRAGMA user_version").get() as { user_version: number })
       .user_version,
-    3,
+    4,
   );
   assert.equal(m.view(1000).checks[0].lastSuccessfulAt, 1000);
   const renamed = {

@@ -6,7 +6,7 @@ export function migrateMonitor(db: DatabaseSync) {
   const version = (
     db.prepare("PRAGMA user_version").get() as { user_version: number }
   ).user_version;
-  if (version > 3)
+  if (version > 4)
     throw Error("Monitoring database was created by a newer Hostboard release");
   db.exec("BEGIN IMMEDIATE");
   try {
@@ -62,6 +62,11 @@ export function migrateMonitor(db: DatabaseSync) {
         INSERT OR IGNORE INTO check_generations(checkId,generation,fingerprint)
           SELECT checkId,generation,'' FROM incidents GROUP BY checkId,generation;
         PRAGMA user_version=3;`);
+    }
+    if (version < 4) {
+      db.exec(`CREATE TABLE server_groups(id TEXT PRIMARY KEY,name TEXT NOT NULL COLLATE NOCASE UNIQUE);
+        CREATE TABLE server_registry(id TEXT PRIMARY KEY,definition TEXT NOT NULL,guid TEXT UNIQUE,enabled INTEGER NOT NULL DEFAULT 1,archived INTEGER NOT NULL DEFAULT 0,groupId TEXT,discovery TEXT,lastSeen TEXT);
+        PRAGMA user_version=4;`);
     }
     db.exec("COMMIT");
   } catch (error) {

@@ -1,7 +1,7 @@
 name: hostboard
 services:
   hostboard:
-    image: ${HOSTBOARD_IMAGE:-ghcr.io/klcaron/hostboard:0.6.2}
+    image: ${HOSTBOARD_IMAGE:-ghcr.io/klcaron/hostboard:0.7.0}
     user: "${HOSTBOARD_UID:-1000}:${HOSTBOARD_GID:-1000}"
     restart: unless-stopped
     ports:

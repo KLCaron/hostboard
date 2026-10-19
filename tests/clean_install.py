@@ -26,7 +26,7 @@ DOCKER = shlex.split(os.environ.get('DOCKER', 'docker'))
 if DOCKER[0] == 'sudo':
     DOCKER.insert(1, '--preserve-env=COMPOSE_FILE,COMPOSE_PROJECT_NAME,HOSTBOARD_IMAGE')
 IMAGE = os.environ.get('HOSTBOARD_TEST_IMAGE', 'hostboard:ci')
-PREVIOUS_IMAGE = os.environ.get('HOSTBOARD_PREVIOUS_IMAGE','ghcr.io/klcaron/hostboard@sha256:583ca4c6c63f72fe3e8a3ce5311dfedb22559555c97ff94ca388f54827070424')
+PREVIOUS_IMAGE = os.environ.get('HOSTBOARD_PREVIOUS_IMAGE','ghcr.io/klcaron/hostboard@sha256:4cbffac2c76f353c365c057842cb8142a30b048de83de437e52227865b05512b')
 
 
 def free_port():
@@ -210,12 +210,12 @@ def main():
             assert api('/api/admin/config')[1]['checks'][0]['id']==check_id
             with sqlite3.connect(root/'backups/before-upgrade/monitor.sqlite') as db:
                 previous_schema=db.execute('pragma user_version').fetchone()[0]
-                assert previous_schema in (1,2)
+                assert previous_schema in (1,2,3)
                 old_samples=db.execute('select count(*) from samples').fetchone()[0]
             with sqlite3.connect(external_data/'monitor.sqlite') as db:
-                assert db.execute('pragma user_version').fetchone()[0]==3
+                assert db.execute('pragma user_version').fetchone()[0]==4
                 assert db.execute('select count(*) from samples where generation=1').fetchone()[0]>=old_samples
-            print(f'PASS: real preserved image/schema{previous_schema} to corrected image/schema3 migration with retained observations.',flush=True)
+            print(f'PASS: real preserved image/schema{previous_schema} to candidate image/schema4 migration with retained observations.',flush=True)
             # Create a real outage/incident, observe unavailable Agent, then restore.
             compose('stop','fixture')
             for _ in range(25):

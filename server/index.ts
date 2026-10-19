@@ -1,11 +1,13 @@
 import express from "express";
+import { Servers } from "./servers.js";
+import { loadAgentTrust } from "./agent-policy.js";
 import { readFileSync } from "node:fs";
 import { logsAPI, loadLogConfig, SSHLogProvider } from "./logs.js";
 import { validateWindow } from "./investigation.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadConfig, privateBind } from "./config.js";
-import { Agent, RANGES } from "./netdata.js";
+import { RANGES } from "./netdata.js";
 import type { Range } from "../src/types.js";
 import { loadChecks } from "./check-config.js";
 import { Monitor } from "./monitor.js";
@@ -22,8 +24,8 @@ if (!admin)
   throw Error(
     "Administrator configuration is missing. Run scripts/setup.sh before starting Hostboard.",
   );
-const agents = loadConfig().hosts.map((host) => new Agent(host));
-const seed = loadChecks(agents.map((a) => a.config.id));
+const bootstrap = loadConfig().hosts;
+const seed = loadChecks(bootstrap.map(h => h.id));
 const configuration = new Configuration(
   process.env.HOSTBOARD_DB || "data/monitor.sqlite",
   seed,
@@ -33,6 +35,9 @@ const monitor = new Monitor(
   configuration.db,
   smtpDelivery(() => configuration.settings().notifications),
 );
+const registry = new Servers(configuration, await loadAgentTrust(bootstrap), bootstrap);
+const logConfig = loadLogConfig(registry.ids());
+registry.setLoggingHosts(logConfig.hosts.map(h => h.hostId));
 synchronize(configuration, monitor);
 const app = express();
 app.disable("x-powered-by");
@@ -77,14 +82,15 @@ app.use(
     configuration,
     monitor,
     admin,
-    agents.map((a) => a.config.id),
+    () => registry.ids(),
     undefined,
     bootstrapTargets(seed.checks),
   ),
 );
-app.use("/api/admin/logs", logsAPI(configuration, monitor, admin, agents.map(a=>a.config.id), new SSHLogProvider(loadLogConfig(agents.map(a=>a.config.id)))));
+app.use("/api/admin/servers", registry.api(admin));
+app.use("/api/admin/logs", logsAPI(configuration, monitor, admin, () => registry.ids(), new SSHLogProvider(logConfig)));
 app.get("/api/system", async (_req, res) => {
-  const hosts = await Promise.all(agents.map((a) => a.current()));
+  const hosts = await registry.fleet();
   const view = monitor.view(undefined, undefined, false);
   res.json({
     version: JSON.parse(readFileSync(path.resolve("package.json"), "utf8"))
@@ -166,15 +172,16 @@ app.get("/api/incidents/:id", async (req, res) => {
 });
 app.get("/api/fleet", async (_req, res) =>
   res.json({
-    hosts: await Promise.all(agents.map((agent) => agent.current())),
+    hosts: await registry.fleet(),
+    groups: registry.groups(),
     generatedAt: new Date().toISOString(),
     refreshSeconds: 10,
   }),
 );
 app.get("/api/hosts/:id/health", async (req, res) => {
-  const agent = agents.find((a) => a.config.id === req.params.id);
+  const agent = registry.agent(req.params.id);
   if (!agent) {
-    res.status(404).json({ error: "Unknown host" });
+    res.status(404).json({ error: "Unknown host or monitoring is disabled; historical references are retained" });
     return;
   }
   const host = await agent.current();
@@ -183,9 +190,9 @@ app.get("/api/hosts/:id/health", async (req, res) => {
     .json({ status: host.status === "online" ? "ok" : "unavailable" });
 });
 app.get("/api/hosts/:id/history", async (req, res) => {
-  const agent = agents.find((a) => a.config.id === req.params.id);
+  const agent = registry.agent(req.params.id);
   if (!agent) {
-    res.status(404).json({ error: "Unknown host" });
+    res.status(404).json({ error: "Unknown host or monitoring is disabled; historical references are retained" });
     return;
   }
   const range = req.query.range ?? "1h";
@@ -207,9 +214,9 @@ for (const endpoint of [
   "metric-history",
 ] as const) {
   app.get(`/api/hosts/:id/${endpoint}`, async (req, res) => {
-    const agent = agents.find((a) => a.config.id === req.params.id);
+    const agent = registry.agent(req.params.id);
     if (!agent) {
-      res.status(404).json({ error: "Unknown host" });
+      res.status(404).json({ error: "Unknown host or monitoring is disabled; historical references are retained" });
       return;
     }
     let window;
@@ -297,7 +304,7 @@ let listening = 0;
 const servers = addresses.map((address) =>
   app.listen(port, address, () => {
     console.log(
-      `Hostboard listening on ${address}:${port}; ${agents.length} hosts configured`,
+      `Hostboard listening on ${address}:${port}; ${registry.ids().length} hosts configured`,
     );
     // Self-checks must not race the HTTP listeners during startup.
     if (++listening === addresses.length) monitor.start();

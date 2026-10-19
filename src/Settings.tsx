@@ -1,6 +1,7 @@
+import { ServerSettings } from "./ServerSettings";
 import { TabList } from "./TabList";
 import { LogSettings } from './LogSettings';
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Host } from "./types";
 import type { MonitorView } from "./monitor-types";
 import type { Settings as Values } from "../server/settings";
@@ -44,6 +45,7 @@ interface Config {
 }
 const tabs = [
   "General",
+  "Servers",
   "Services",
   "Log Sources",
   "Notifications",
@@ -157,7 +159,7 @@ export function Settings({
   const display = useDisplay(),
     [personal, setPersonal] = useState(display),
     [scope, setScope] = useState("personal");
-  const [tab, setTab] = useState<(typeof tabs)[number]>(() => new URLSearchParams(location.hash.split("?")[1] ?? "").get("tab") === "logs" ? "Log Sources" : "General"),
+  const [tab, setTab] = useState<(typeof tabs)[number]>(() => new URLSearchParams(location.hash.split("?")[1] ?? "").get("tab") === "servers" ? "Servers" : new URLSearchParams(location.hash.split("?")[1] ?? "").get("tab") === "logs" ? "Log Sources" : "General"),
     [session, setSession] = useState<{ admin: boolean; configured: boolean; mode?: string }>(),
     [config, setConfig] = useState<Config>(),
     [draft, setDraft] = useState<Values>(),
@@ -229,7 +231,10 @@ export function Settings({
     };
   }, [tab]);
 
+  const [serverDirty, setServerDirty] = useState(false);
+  const onServerDirty = useCallback((value: boolean) => setServerDirty(value), []);
   const dirty =
+    serverDirty ||
     JSON.stringify(draft) !== JSON.stringify(config?.settings) ||
     JSON.stringify(personal) !== JSON.stringify(display) ||
     !!service;
@@ -291,6 +296,7 @@ export function Settings({
     setPersonal(display);
     setService(undefined);
     setTab(t);
+    if (session?.admin && tab === "Servers" && t !== "Servers") void reload().catch(e => setFailure(e.message));
     setFailure("");
     setMessage("");
   }
@@ -842,6 +848,7 @@ export function Settings({
           )}
         </section>
       )}
+      {tab === "Servers" && <ServerSettings admin={!!session?.admin} hosts={hosts} onDirty={onServerDirty}/>}
       {tab === "Log Sources" && <LogSettings hosts={hosts} data={data} admin={!!session?.admin}/>}
       {tab === "Notifications" && (
         <>

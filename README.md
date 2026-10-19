@@ -23,7 +23,7 @@ Requires Linux, Git, Docker Engine with Compose v2, and at least one reachable N
 ```sh
 git clone https://github.com/KLCaron/hostboard.git
 cd hostboard
-git checkout v0.6.2
+git checkout v0.7.0
 ./scripts/setup.sh
 ./scripts/setup.sh --check
 docker compose up -d --wait
@@ -78,7 +78,7 @@ Read approved Docker stdout/stderr from container and service details, or open r
 ```sh
 ./scripts/manage.sh backup ./backups/manual
 # After reviewing a newer release, substitute its exact version or digest:
-./scripts/manage.sh upgrade ghcr.io/klcaron/hostboard:0.6.2 ./backups/before-upgrade
+./scripts/manage.sh upgrade ghcr.io/klcaron/hostboard:0.7.0 ./backups/before-upgrade
 # Restore the paired image, configuration, and database if necessary:
 ./scripts/manage.sh rollback ./backups/before-upgrade
 ```
@@ -94,3 +94,7 @@ Report bugs and feature requests in [GitHub Issues](https://github.com/KLCaron/h
 ## License
 
 Hostboard is **AGPL-3.0-only**; see [LICENSE](LICENSE). If you modify and provide Hostboard over a network, offer users the corresponding source as required by the license. Releases link to their source commit. Dependencies retain their own compatible licenses and notices; see [third-party notices](THIRD_PARTY_NOTICES.txt) and [dependency review](docs/dependencies.md). Screenshots show the actual application using synthetic test data and generic names.
+
+### Server management
+
+Administrators can add, test, rename, disable, archive and group existing Netdata Agents in Settings → Servers. Discovery pins physical node identity and reports available metrics and host metadata. Deployment-owned destination policy remains separate from the registry. See [server connections, approval and migration](docs/servers.md).

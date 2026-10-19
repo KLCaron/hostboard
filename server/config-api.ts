@@ -60,7 +60,7 @@ export function configAPI(
   store: Configuration,
   monitor: Monitor,
   admin: AdminConfig | null,
-  hostIds: string[],
+  hostIds: string[] | (() => string[]),
   auth = authorization(admin),
   fallbackTargets: TargetRule[] = [],
 ) {
@@ -177,7 +177,7 @@ export function configAPI(
       throw Error(
         "Deployment-managed authentication cannot move to another origin",
       );
-    if (!hostIds.includes(c.hostId)) throw Error("Choose a configured host");
+    if (!(typeof hostIds === "function" ? hostIds() : hostIds).includes(c.hostId)) throw Error("Choose a configured host");
     if (c.timeoutMs >= c.intervalSeconds * 1000)
       throw Error("Timeout must be shorter than the check interval");
     return c;

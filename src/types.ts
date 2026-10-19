@@ -32,6 +32,13 @@ export interface Alert {
   count: number;
 }
 export interface Host {
+  discovery?: import('./server-types.js').ServerDiscovery;
+  enabled?: boolean;
+  archived?: boolean;
+  groupId?: string | null;
+  groupName?: string | null;
+  lastCommunication?: string | null;
+  loggingConfigured?: boolean;
   id: string;
   name: string;
   hostname: string;
@@ -57,6 +64,7 @@ export interface Host {
 }
 export interface Fleet {
   hosts: Host[];
+  groups?: import('./server-types.js').ServerGroup[];
   generatedAt: string;
   refreshSeconds: number;
 }

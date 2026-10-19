@@ -283,11 +283,12 @@ export function logsAPI(
   store: Configuration,
   monitor: Monitor,
   admin: AdminConfig,
-  hostIds: string[],
+  hostIds: string[] | (() => string[]),
   provider: LogProvider,
   auth = authorization(admin),
 ) {
   const router = Router();
+  const registered = (id: string) => (typeof hostIds === "function" ? hostIds() : hostIds).includes(id);
   router.use(
     auth.guard,
     rateLimit({
@@ -304,7 +305,7 @@ export function logsAPI(
   );
   function context(raw: unknown) {
     const c = ContextSchema.parse(raw);
-    if (!hostIds.includes(c.hostId)) throw Error("Unknown host");
+    if (!registered(c.hostId)) throw Error("Unknown host");
     if (c.incidentId) {
       const i = store.db
         .prepare("SELECT checkId,hostId,generation FROM incidents WHERE id=?")
@@ -391,7 +392,7 @@ export function logsAPI(
     return controller.signal;
   }
   router.get("/sources/:hostId", async (req, res) => {
-    if (!hostIds.includes(req.params.hostId)) {
+    if (!registered(req.params.hostId)) {
       res.status(404).json({ error: "Unknown host" });
       return;
     }
@@ -422,7 +423,7 @@ export function logsAPI(
   });
   let active = 0;
   router.post("/query/:hostId", async (req, res) => {
-    if (!hostIds.includes(req.params.hostId)) {
+    if (!registered(req.params.hostId)) {
       res.status(404).json({ error: "Unknown host" });
       return;
     }

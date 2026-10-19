@@ -30,7 +30,7 @@ if (command === "backup") {
     source.exec("PRAGMA journal_mode=DELETE");
     const schema = source.prepare("PRAGMA user_version").get() as {user_version:number};
     const integrity = source.prepare("PRAGMA quick_check").get() as {quick_check:string};
-    if (![1,2,3].includes(schema.user_version) || integrity.quick_check !== "ok" || !source.prepare("SELECT id FROM app_settings WHERE id=1").get()) throw Error("Invalid or incompatible backup");
+    if (![1,2,3,4].includes(schema.user_version) || integrity.quick_check !== "ok" || !source.prepare("SELECT id FROM app_settings WHERE id=1").get()) throw Error("Invalid or incompatible backup");
   } catch (error) {
     source.close();
     for (const suffix of ["", "-wal", "-shm"]) rmSync(temporary+suffix,{force:true});

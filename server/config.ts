@@ -1,7 +1,7 @@
 import { isIP } from 'node:net';
 import { readFileSync } from 'node:fs';
 import { z } from 'zod';
-const HostSchema = z.object({
+export const HostSchema = z.object({
   id: z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/),
   name: z.string().min(1).max(80),
   url: z.url().refine((value) => {
@@ -23,7 +23,7 @@ const HostSchema = z.object({
     .optional(),
 });
 export const ConfigSchema = z
-  .object({ hosts: z.array(HostSchema).min(1).max(20) })
+  .object({ hosts: z.array(HostSchema).max(100) })
   .refine(
     (c) => new Set(c.hosts.map((h) => h.id)).size === c.hosts.length,
     'Host ids must be unique',

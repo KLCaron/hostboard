@@ -30,7 +30,10 @@ function blocked(ip: string) {
     ["240.0.0.0", 4],
   ] as const)
     list.addSubnet(address, prefix);
-  list.addAddress("::", "ipv6");
+  list.addAddress("100.100.100.200");
+  list.addSubnet("::", 96, "ipv6");
+  list.addSubnet("64:ff9b::", 96, "ipv6");
+  list.addSubnet("64:ff9b:1::", 48, "ipv6");
   list.addSubnet("fe80::", 10, "ipv6");
   list.addSubnet("ff00::", 8, "ipv6");
   list.addAddress("fd00:ec2::254", "ipv6");

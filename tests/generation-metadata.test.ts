@@ -138,7 +138,7 @@ test("schema 2 actual release fixture migrates without inventing identities or l
     const monitor = new Monitor(store.runtime(), store.db, null, 1050);
     assert.equal(
       store.db.prepare("PRAGMA user_version").get()?.user_version,
-      3,
+      4,
     );
     assert.deepEqual(snapshot(store.db), before);
     assert.deepEqual(
@@ -198,10 +198,10 @@ test("schema 3 late migration failure rolls back columns/version/rows and can sa
   db.exec = exec;
   migrateMonitor(db);
   assert.deepEqual(snapshot(db), before);
-  assert.equal(db.prepare("PRAGMA user_version").get()?.user_version, 3);
+  assert.equal(db.prepare("PRAGMA user_version").get()?.user_version, 4);
   db.close();
   const future = new DatabaseSync(":memory:");
-  future.exec("PRAGMA user_version=4");
+  future.exec("PRAGMA user_version=5");
   assert.throws(() => new Monitor(seed, future, null), /newer/);
   assert.equal(
     future.prepare("SELECT count(*) n FROM sqlite_schema").get()?.n,

@@ -73,7 +73,7 @@ export class Monitor {
       mkdirSync(path.dirname(filename), { recursive: true, mode: 0o700 });
     this.db =
       typeof filename === "string" ? new DatabaseSync(filename) : filename;
-    if (Number(this.db.prepare("PRAGMA user_version").get()?.user_version) > 3)
+    if (Number(this.db.prepare("PRAGMA user_version").get()?.user_version) > 4)
       throw Error(
         "Monitoring database was created by a newer Hostboard release",
       );

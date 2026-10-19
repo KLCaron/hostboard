@@ -224,7 +224,9 @@ export function Dashboard({
   widgets,
   hosts,
   range,
+  visibleHostIds,
 }: {
+  visibleHostIds?: string[];
   widgets: Widget[];
   hosts: Host[];
   range: Range;
@@ -361,7 +363,7 @@ export function Dashboard({
       )}
       <div className={`dashboard-grid ${editing ? "editing" : ""}`}>
         {current.widgets
-          .filter((w) => w.visible)
+          .filter((w) => w.visible && (!w.id.startsWith("host-") || !visibleHostIds || visibleHostIds.includes(w.id.slice(5))))
           .map((w) => {
             const widget = widgets.find((x) => x.id === w.id),
               index = current.widgets.findIndex((x) => x.id === w.id),

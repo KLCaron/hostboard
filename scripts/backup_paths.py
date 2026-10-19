@@ -82,7 +82,7 @@ def main():
         if not (checkpoint/'private/admin.json').is_file() or not (checkpoint/'config/hosts.json').is_file():
             raise ValueError('Backup is missing required configuration')
         with sqlite3.connect(f'file:{checkpoint}/monitor.sqlite?mode=ro',uri=True) as db:
-            if db.execute('PRAGMA quick_check').fetchone()[0]!='ok' or db.execute('PRAGMA user_version').fetchone()[0] not in (1,2,3):
+            if db.execute('PRAGMA quick_check').fetchone()[0]!='ok' or db.execute('PRAGMA user_version').fetchone()[0] not in (1,2,3,4):
                 raise ValueError('Invalid database checkpoint')
             if not db.execute('SELECT id FROM app_settings WHERE id=1').fetchone(): raise ValueError('Missing configuration database')
         # Resolve and verify the exact saved image before stopping the running service.

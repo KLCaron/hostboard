@@ -1,0 +1,13 @@
+{
+  "endpoints": [
+    {
+      "url": "http://agent.example.internal:19999",
+      "addresses": ["10.20.0.10"]
+    },
+    {
+      "url": "https://agent-secure.example.internal",
+      "addresses": ["10.20.0.11"],
+      "tokenEnv": "NETDATA_SECURE_TOKEN"
+    }
+  ]
+}

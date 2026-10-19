@@ -1,0 +1,13 @@
+{
+  "nodes": [
+    {"mg":"parent-machine-guid","nd":"parent-node-id","nm":"fixture-parent","state":"reachable","v":"v2.12.1","hw":{"cpus":"4","memory":"16531214336"},"os":{"nm":"Ubuntu","v":"24.04.5 LTS","kernel":{"nm":"Linux","v":"6.17.0"}},"labels":{"_system_cpu_model":"Example CPU","_system_cores":"4","_system_ram_total":"16531214336","_is_parent":"true"}},
+    {"mg":"child-machine-guid","nd":"child-node-id","nm":"fixture-child","state":"reachable","v":"v2.12.1","hw":{"cpus":"6","memory":"24429363200"},"os":{"nm":"Ubuntu","v":"26.04.1 LTS","kernel":{"nm":"Linux","v":"7.0.0"}},"labels":{"_system_cpu_model":"Example child CPU","_is_parent":"false"}}
+  ],
+  "charts": {
+    "system.cpu":{"id":"system.cpu","context":"system.cpu","family":"cpu","units":"percentage","plugin":"proc","module":"/proc/stat","chart_labels":{},"dimensions":{"idle":{"name":"idle"},"user":{"name":"user"}}},
+    "disk_space._":{"id":"disk_space._","context":"disk.space","family":"/","units":"GiB","plugin":"diskspace","module":"diskspace","chart_labels":{"mount_point":"/","filesystem":"ext4"}},
+    "net.eth0":{"id":"net.eth0","context":"net.net","family":"eth0","units":"kilobits/s","plugin":"proc","module":"/proc/net/dev","chart_labels":{"interface":"eth0"}},
+    "mem.available":{"id":"mem.available","context":"mem.available","family":"ram","units":"MiB","plugin":"proc","module":"/proc/meminfo","chart_labels":{}},
+    "pressure.cpu":{"id":"pressure.cpu","context":"system.cpu_some_pressure","family":"cpu","units":"percentage","plugin":"proc","module":"/proc/pressure","chart_labels":{}}
+  }
+}

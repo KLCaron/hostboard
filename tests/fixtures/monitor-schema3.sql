@@ -1,0 +1,71 @@
+-- Schema-3 release migration from unmodified v0.6.2 (5e0ce22); synthetic targets and log mapping.
+BEGIN TRANSACTION;
+CREATE TABLE action_limits(action TEXT PRIMARY KEY,time REAL NOT NULL);
+CREATE TABLE app_settings(id INTEGER PRIMARY KEY CHECK(id=1),value TEXT NOT NULL,revision INTEGER NOT NULL);
+INSERT INTO "app_settings" VALUES(1,'{"general":{"refreshSeconds":10,"temperature":"C","range":"1h","landing":"overview","compact":false},"notifications":{"enabled":true,"recipients":[],"minimumSeverity":"warning","cooldownSeconds":0,"recovery":true},"retention":{"sampleDays":30,"incidentDays":0}}',2);
+CREATE TABLE check_evaluation(id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, generation INTEGER NOT NULL DEFAULT 1);
+INSERT INTO "check_evaluation" VALUES('historical','350ba9a82cb959d9d99e818845a259b54ea2b1a9e97262db34ba1374d7a199fa',2);
+CREATE TABLE check_generations(checkId TEXT NOT NULL,generation INTEGER NOT NULL,fingerprint TEXT NOT NULL,startedAt REAL,endedAt REAL, targetMetadata TEXT, supersededReason TEXT,PRIMARY KEY(checkId,generation));
+INSERT INTO "check_generations" VALUES('historical',1,'806ecea0957b2e0d4e255dd96a4130dd6b6a6d4217a9a74725303620fa71a4df',1000.0,1030.0,NULL,NULL);
+INSERT INTO "check_generations" VALUES('historical',2,'350ba9a82cb959d9d99e818845a259b54ea2b1a9e97262db34ba1374d7a199fa',1030.0,NULL,NULL,NULL);
+CREATE TABLE checks(id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, checked REAL, failures INTEGER NOT NULL DEFAULT 0, firstFailure REAL, active INTEGER, ok INTEGER, ms REAL, reason TEXT NOT NULL DEFAULT 'Not checked yet', lastSent REAL);
+INSERT INTO "checks" VALUES('historical','36dabbd60743173df4060ebdaa73043c13d9f50f5942ba3ab06b860404bd1683',1040.0,1,1040.0,3,0,2.0,'HTTP 503',NULL);
+CREATE TABLE config_audit(id INTEGER PRIMARY KEY,time REAL NOT NULL,actor TEXT NOT NULL,action TEXT NOT NULL);
+CREATE TABLE external_incidents(checkId TEXT NOT NULL,remoteId INTEGER NOT NULL,incident INTEGER UNIQUE,generation INTEGER NOT NULL,PRIMARY KEY(checkId,generation,remoteId));
+INSERT INTO "external_incidents" VALUES('historical',7,2,1);
+CREATE TABLE incidents(id INTEGER PRIMARY KEY, checkId TEXT NOT NULL, name TEXT NOT NULL, hostId TEXT NOT NULL, severity TEXT NOT NULL, startedAt REAL NOT NULL, detectedAt REAL NOT NULL, endedAt REAL, reason TEXT NOT NULL, lastReason TEXT NOT NULL, responseMs REAL, resolution TEXT, monitoringGap INTEGER NOT NULL DEFAULT 0, generation INTEGER NOT NULL DEFAULT 1);
+INSERT INTO "incidents" VALUES(1,'historical','Former target','old-host','critical',1010.0,1010.0,1020.0,'HTTP 503','HTTP 200',1.0,'Reachability restored',0,1);
+INSERT INTO "incidents" VALUES(2,'historical','Remote / service','Remote','critical',980.0,990.0,1000.0,'Remote failure','Recovered',NULL,'Reachability restored',0,1);
+INSERT INTO "incidents" VALUES(3,'historical','Replacement target','new-host','critical',1040.0,1040.0,NULL,'HTTP 503','HTTP 503',2.0,NULL,0,2);
+CREATE TABLE log_mappings(context TEXT NOT NULL,source TEXT NOT NULL,PRIMARY KEY(context,source));
+INSERT INTO "log_mappings" VALUES('["new-host","historical",2,null]','approved-source');
+CREATE TABLE mail_tests(id INTEGER PRIMARY KEY,time REAL NOT NULL,state TEXT NOT NULL);
+CREATE TABLE metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+INSERT INTO "metadata" VALUES('mailNamespace','7fd9d5d6-e57e-4ee5-97ae-4e91ae52c5cb');
+CREATE TABLE notifications(id INTEGER PRIMARY KEY, incident INTEGER NOT NULL, checkId TEXT NOT NULL, event TEXT NOT NULL, state TEXT NOT NULL, subject TEXT NOT NULL, body TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, nextAttempt REAL NOT NULL, lastAttempt REAL, deliveredAt REAL, error TEXT, UNIQUE(incident,event));
+INSERT INTO "notifications" VALUES(1,1,'historical','outage','suppressed','[Hostboard] CRITICAL: old-host / Former target','Former target on old-host
+State: unreachable
+Severity: critical
+Started: 1970-01-01T00:16:50.000Z
+Confirmed: 1970-01-01T00:16:50.000Z
+Reason: HTTP 503
+Response: 2 ms
+Check: historical (http); reachability does not prove full application functionality.
+Dashboard: Hostboard#host=old-host
+',0,1010.0,NULL,NULL,'Check configuration changed');
+INSERT INTO "notifications" VALUES(2,1,'historical','recovery','suppressed','[Hostboard] RECOVERED: old-host / Former target','Former target on old-host
+State: reachable
+Severity: critical
+Started: 1970-01-01T00:16:50.000Z
+Recovered: 1970-01-01T00:17:00.000Z
+Elapsed outage: 10 seconds (may include monitoring gaps)
+Reason: HTTP 200
+Response: 1 ms
+Check: historical (http); reachability does not prove full application functionality.
+Dashboard: Hostboard#host=old-host
+',0,1020.0,NULL,NULL,'Check configuration changed');
+INSERT INTO "notifications" VALUES(3,2,'historical','outage','external-delivered','','',1,0.0,990.0,990.0,NULL);
+INSERT INTO "notifications" VALUES(4,3,'historical','outage','pending','[Hostboard] CRITICAL: new-host / Replacement target','Replacement target on new-host
+State: unreachable
+Severity: critical
+Started: 1970-01-01T00:17:20.000Z
+Confirmed: 1970-01-01T00:17:20.000Z
+Reason: HTTP 503
+Response: 2 ms
+Check: historical (http); reachability does not prove full application functionality.
+Dashboard: Hostboard#host=new-host
+',0,1040.0,NULL,NULL,NULL);
+CREATE TABLE samples(checkId TEXT NOT NULL,time REAL NOT NULL,ok INTEGER,ms REAL,interval REAL NOT NULL,generation INTEGER NOT NULL DEFAULT 1,PRIMARY KEY(checkId,generation,time));
+INSERT INTO "samples" VALUES('historical',1000.0,1,1.0,10.0,1);
+INSERT INTO "samples" VALUES('historical',1010.0,0,2.0,10.0,1);
+INSERT INTO "samples" VALUES('historical',1020.0,1,1.0,10.0,1);
+INSERT INTO "samples" VALUES('historical',1040.0,0,2.0,10.0,2);
+CREATE TABLE service_config(id TEXT PRIMARY KEY,definition TEXT NOT NULL,enabled INTEGER NOT NULL,deleted INTEGER NOT NULL DEFAULT 0);
+INSERT INTO "service_config" VALUES('historical','{"id":"historical","name":"Replacement target","hostId":"new-host","intervalSeconds":10,"timeoutMs":9000,"failureThreshold":1,"severity":"critical","notify":true,"cooldownSeconds":0,"type":"http","url":"https://example.test/replaced","expectedStatuses":[200],"followRedirects":false,"watchdogHistory":false}',1,0);
+CREATE INDEX incident_time ON incidents(startedAt DESC);
+CREATE INDEX notification_due ON notifications(state,nextAttempt);
+CREATE INDEX sample_success ON samples(checkId,generation,time DESC) WHERE ok=1;
+CREATE INDEX sample_time ON samples(time);
+CREATE INDEX notification_predecessor ON notifications(checkId,id) WHERE state IN ('pending','failed');
+COMMIT;
+PRAGMA user_version=3;

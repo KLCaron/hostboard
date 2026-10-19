@@ -6,6 +6,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync, chownSyn
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { z } from "zod";
+import { AgentPolicySchema } from "./agent-policy.js";
 import { AdminSchema } from "./admin.js";
 import { ConfigSchema } from "./config.js";
 import { ChecksSchema } from "./check-config.js";
@@ -19,6 +20,7 @@ async function main() {
   if (values.check) {
     const hosts = ConfigSchema.parse(read("config/hosts.json")).hosts;
     AdminSchema.parse(read("private/admin.json"));
+    if (existsSync(path.join(dir, "private/agents.json"))) AgentPolicySchema.parse(read("private/agents.json"));
     const checks = ChecksSchema.parse(existsSync(path.join(dir, "config/checks.json")) ? read("config/checks.json") : {});
     if (checks.checks.some(c => !hosts.some(h => h.id === c.hostId))) throw Error("A check refers to an unknown host");
     if (existsSync(path.join(dir, "private/smtp.json"))) SmtpSchema.parse(read("private/smtp.json"));

@@ -1,3 +1,4 @@
+import { DiscoverySummary } from "./ServerSettings";
 import { TabList } from "./TabList";
 import { LogsPage } from './Logs';
 import { RangeSelector } from './RangeSelector';
@@ -218,7 +219,7 @@ function HostCard({
 }) {
   const display = useDisplay();
   const [tab, setTab] = useState<
-    "performance" | "diagnostics" | "containers" | "sensors"
+    "performance" | "diagnostics" | "containers" | "sensors" | "information"
   >("performance");
   const live = host.status === "online",
     points = history?.points || [],
@@ -250,7 +251,7 @@ function HostCard({
         </button>
         <span className={`status ${host.status}`}>
           <i />
-          {host.status === "online"
+          {host.archived ? "Archived" : host.enabled === false ? "Disabled" : host.status === "online"
             ? "Online"
             : host.status === "offline"
               ? "Offline"
@@ -418,7 +419,7 @@ function HostCard({
             aria-label={`${host.name} details`}
           >
             {(
-              ["performance", "diagnostics", "containers", "sensors"] as const
+              ["performance", "information", "diagnostics", "containers", "sensors"] as const
             ).map((t) => (
               <button
                 role="tab"
@@ -428,7 +429,7 @@ function HostCard({
                 onClick={() => setTab(t)}
                 key={t}
               >
-                {t === "performance"
+                {t === "information" ? "Host information" : t === "performance"
                   ? "Performance"
                   : t === "containers"
                     ? `Containers (${host.containers.length})`
@@ -495,6 +496,15 @@ function HostCard({
               ))}
             </>
           )}
+          {tab === "information" && <section aria-label="Host information">
+            <h3>{host.name} · {host.hostname}</h3>
+            <p>{host.archived ? 'Archived · monitoring stopped' : host.enabled === false ? 'Monitoring disabled' : `Connection: ${host.status}`} · {host.groupName || 'Ungrouped'}</p>
+            <p>Last successful communication: {host.lastCommunication ? new Date(host.lastCommunication).toLocaleString() : 'Not yet recorded'}</p>
+            <p>Latest metric sample: {host.lastSeen ? new Date(host.lastSeen).toLocaleString() : 'Unavailable'} · Freshness: {host.status}</p>
+            <p>Docker logs: {host.loggingConfigured ? 'Deployment-approved adapter configured' : 'Unconfigured; Agent registration does not grant log access'}</p>
+            {host.discovery ? <DiscoverySummary value={host.discovery}/> : <p className="muted">No cached node metadata available. Retry the connection in Settings.</p>}
+            <a className="action-link" href="#settings?tab=servers">Manage server / Test connection</a>
+          </section>}
           <a className="text-link host-permalink" href={`#host=${host.id}`}>
             Direct link to {host.name} ↗
           </a>
@@ -561,6 +571,7 @@ function App() {
           : route.page,
       );
       setExpanded(route.host ?? null);
+      if (route.host) { setGroupFilter(''); setShowArchived(true); }
       setQuery("");
       setTarget(null);
     };
@@ -591,6 +602,7 @@ function App() {
       }
     }
     void load();
+    window.addEventListener("hostboard:servers", load);
     const interval = setInterval(
       () => void load(),
       display.refreshSeconds * 1000,
@@ -598,10 +610,11 @@ function App() {
     return () => {
       cancelled = true;
       controller?.abort();
+      window.removeEventListener("hostboard:servers", load);
       clearInterval(interval);
     };
   }, [refresh, display.refreshSeconds]);
-  const ids = fleet?.hosts.map((h) => h.id).join(",") || "";
+  const ids = fleet?.hosts.filter(h => h.enabled !== false && !h.archived).map((h) => h.id).join(",") || "";
   useEffect(() => {
     if (!ids) return;
     let cancelled = false;
@@ -671,7 +684,13 @@ function App() {
           }
         : h,
     ),
-    online = hosts.filter((h) => h.status === "online");
+    allHosts = hosts;
+  const [groupFilter, setGroupFilter] = useState(() => readPreference<string>('server-group', '', v => typeof v === 'string'));
+  const [showArchived, setShowArchived] = useState(false);
+  const effectiveGroup = groupFilter === 'ungrouped' || fleet?.groups?.some(g => g.id === groupFilter) ? groupFilter : '';
+  const scopedHosts = hosts.filter(h => !h.archived && (!effectiveGroup || (effectiveGroup === 'ungrouped' ? !h.groupId : h.groupId === effectiveGroup)));
+  const online = scopedHosts.filter(h => h.status === 'online' && h.enabled !== false);
+  const groupLabel = effectiveGroup === 'ungrouped' ? 'Ungrouped' : fleet?.groups?.find(g => g.id === effectiveGroup)?.name;
   const issueCount = activeIssueCount(hosts, monitoring.data);
   const cpuHosts = online.filter((h) => h.cpu !== null && h.cores !== null),
     cores = cpuHosts.reduce((n, h) => n + h.cores!, 0),
@@ -688,7 +707,7 @@ function App() {
       .filter((h) => h.dockerAvailable)
       .flatMap((h) => h.containers),
     running = containers.filter((c) => c.state === "running").length;
-  const visibleHosts = hosts.filter((h) =>
+  const visibleHosts = (showArchived ? hosts.filter(h => !effectiveGroup || (effectiveGroup === 'ungrouped' ? !h.groupId : h.groupId === effectiveGroup)) : scopedHosts).filter((h) =>
     `${h.name} ${h.hostname}`.toLowerCase().includes(query.toLowerCase()),
   );
   const age = fleet
@@ -703,7 +722,7 @@ function App() {
     ) event.preventDefault();
   };
   const fleetSummary = (
-    <section className="fleet-stats" aria-label="Fleet summary">
+    <section className="fleet-stats" aria-label={effectiveGroup ? `${groupLabel} summary` : "Fleet summary"}>
       <div className="stat-card">
         <span className="stat-icon green">
           <Server size={19} />
@@ -712,18 +731,18 @@ function App() {
           <span className="stat-label">Hosts online</span>
           <div className="stat-value">
             {fleet ? online.length : "—"}
-            <small>/ {fleet ? hosts.length : "—"}</small>
+            <small>/ {fleet ? scopedHosts.length : "—"}</small>
           </div>
           <span className="stat-note">
             {!fleet
               ? "Connecting to hosts"
-              : online.length === hosts.length
+              : online.length === scopedHosts.length
                 ? "All hosts reporting"
                 : "Some hosts need attention"}
           </span>
         </div>
         <span
-          className={`stat-dot ${online.length === hosts.length && fleet ? "good" : ""}`}
+          className={`stat-dot ${online.length === scopedHosts.length && fleet ? "good" : ""}`}
         />
       </div>
       <div className="stat-card">
@@ -731,7 +750,7 @@ function App() {
           <Cpu size={19} />
         </span>
         <div>
-          <span className="stat-label">Fleet CPU</span>
+          <span className="stat-label">{effectiveGroup ? "Group CPU" : "Fleet CPU"}</span>
           <div className="stat-value">{percent(cpuAvg)}</div>
           <span className="stat-note">
             Weighted across {cores || "—"} cores
@@ -781,8 +800,8 @@ function App() {
       width: "full",
       node: (
         <HealthSummary
-          hosts={hosts}
-          data={monitoring.data}
+          hosts={scopedHosts}
+          data={effectiveGroup && monitoring.data ? { ...monitoring.data, checks: monitoring.data.checks.filter(c => scopedHosts.some(h => h.id === c.hostId)), activeIncidents: monitoring.data.activeIncidents?.filter(i => scopedHosts.some(h => h.id === i.hostId)) } : monitoring.data}
           error={monitoring.error}
         />
       ),
@@ -918,6 +937,11 @@ function App() {
                 : "Waiting for a connection to the Hostboard backend."}
             </div>
           )}
+          {(page === "overview" || page === "servers") && fleet && <div className="server-filter settings-actions">
+            <label>Server group <select aria-label="Filter by server group" value={effectiveGroup} onChange={e => { setGroupFilter(e.target.value); savePreference('server-group', e.target.value); }}><option value="">Entire fleet</option><option value="ungrouped">Ungrouped</option>{fleet.groups?.map(g => <option value={g.id} key={g.id}>{g.name}</option>)}</select></label>
+            <span className="muted small">{effectiveGroup ? `${groupLabel}: ${scopedHosts.length} of ${allHosts.filter(h => !h.archived).length} servers. Summaries cover this group only.` : 'Entire fleet · archived servers excluded from summaries.'}</span>
+            {effectiveGroup && <button onClick={() => { setGroupFilter(''); savePreference('server-group', ''); }}>Show entire fleet</button>}
+          </div>}
           {page === "overview" && (
             <>
               <div className="overview-range">
@@ -928,7 +952,8 @@ function App() {
               {fleet ? (
                 <Dashboard
                   widgets={overviewWidgets}
-                  hosts={hosts}
+                  hosts={scopedHosts}
+                  visibleHostIds={scopedHosts.map(h => h.id)}
                   range={range}
                 />
               ) : (
@@ -942,7 +967,7 @@ function App() {
               <section className="section-heading">
                 <div>
                   <h2>
-                    Servers <span>{hosts.length || "—"}</span>
+                    Servers <span>{scopedHosts.length || "—"}</span>
                   </h2>
                   <p>
                     Current metrics · {rangeLabels[range]} history · CPU
@@ -961,6 +986,7 @@ function App() {
                   onChange={(e) => setQuery(e.target.value)}
                 />
               )}
+              <div className="settings-actions"><label className="check-label"><input type="checkbox" checked={showArchived} onChange={e => setShowArchived(e.target.checked)}/>Show archived servers</label><a className="action-link" href="#settings?tab=servers">Manage servers</a></div>
               {historyError && <div className="notice">{historyError}</div>}
               <section className="host-grid" aria-label="Servers">
                 {fleet

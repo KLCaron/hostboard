@@ -1,8 +1,7 @@
-import { lookup } from 'node:dns/promises';
-import { isIP } from 'node:net';
-import { TargetPolicy } from './targets.js';
-import { CheckSchema } from './check-config.js';
+import { AgentTrust, agentSlot, chartSlot, loadAgentTrust } from './agent-policy.js';
 import { request as pinnedRequest } from './probe.js';
+import { z } from 'zod';
+import type { DiscoveredNode, ServerDiscovery } from '../src/server-types.js';
 import { DIAGNOSTICS, sensorGroup, metricName, activeAlert, resolvedAlert } from './investigation.js';
 import type { Metric, Diagnostic, AlertHistory, MetricHistory, Window } from '../src/investigation-types.js';
 import type { HostConfig } from './config.js';
@@ -34,21 +33,23 @@ type Chart = {
   chart_labels: Record<string, string>;
   dimensions?: Record<string, unknown>;
 };
-type NodeInfo = {
+export type NodeInfo = {
   mg: string;
   nd: string;
   nm: string;
   state: string;
   v: string;
-  hw?: { cpus: string };
-  os?: { nm: string; v: string };
-  health?: { status: string };
+  hw?: { cpus?: string; memory?: string };
+  labels?: Record<string, string>;
+  os?: { nm?: string; v?: string; kernel?: { nm?: string; v?: string } };
+  health?: { status?: string };
 };
 type Meta = {
   node: NodeInfo;
   charts: Record<string, Chart>;
   contexts: Record<string, unknown>;
   time: number;
+  warnings?: string[];
 };
 export type Table = {
   result: { labels: string[]; data: (number | null)[][] };
@@ -115,7 +116,7 @@ function memory(values: Record<string, number | null>) {
   const total = sum(Object.values(values));
   return { used: values.used ?? null, total, percent: ratio(values.used ?? null, total) };
 }
-function empty(config: HostConfig, error: string, lastSeen: string | null = null): Host {
+export function empty(config: HostConfig, error: string, lastSeen: string | null = null): Host {
   return {
     id: config.id,
     name: config.name,
@@ -143,11 +144,33 @@ function empty(config: HostConfig, error: string, lastSeen: string | null = null
 }
 export class Agent {
   private metadata?: Meta;
+  private stopped = new AbortController();
+  lastCommunication: string | null = null;
+  stop() { this.stopped.abort(); }
+
   private snapshot?: { host: Host; time: number };
   private pending?: Promise<Host>;
   private histories = new Map<Range, { value: History; time: number }>();
   private historyPending = new Map<Range, Promise<History>>();
-  constructor(public config: HostConfig) {}
+  constructor(public config: HostConfig, private trust: AgentTrust | Promise<AgentTrust> = loadAgentTrust([config]), private onDiscovery?: (value: ServerDiscovery) => void) {}
+  invalidate() { this.metadata = undefined; this.snapshot = undefined; this.histories.clear(); this.detailsCache.clear(); }
+  async nodes(): Promise<DiscoveredNode[]> {
+    return (await this.nodeList()).map(n => ({ guid: n.mg, nodeId: n.nd || null, hostname: n.nm, state: n.state }));
+  }
+  private async nodeList(): Promise<NodeInfo[]> {
+    const response = await this.request('/api/v3/nodes');
+    const Node = z.object({ mg: z.string().regex(/^[a-zA-Z0-9_.:-]{1,128}$/), nd: z.string().max(128).nullish().transform(v => v || ''), nm: z.string().min(1).max(253), state: z.string().max(80).optional().default('unknown'), v: z.string().max(160).nullish().transform(v => v || ''),
+      health: z.object({ status: z.string().max(80).optional() }).optional(),
+      labels: z.record(z.string(), z.string().max(1024)).optional(),
+      hw: z.object({ cpus: z.string().max(40).optional(), memory: z.string().max(40).optional() }).optional(),
+      os: z.object({ nm: z.string().max(160).optional(), v: z.string().max(160).optional(), kernel: z.object({ nm: z.string().max(160).optional(), v: z.string().max(160).optional() }).optional() }).optional(),
+    });
+    return z.object({ nodes: z.array(Node).min(1).max(1000) }).parse(response).nodes;
+  }
+  async discover(force = false): Promise<ServerDiscovery> {
+    if (force) this.invalidate();
+    return discovery(await this.meta());
+  }
   private detailsCache = new Map<string, { value: unknown; time: number }>();
   private detailsPending = new Map<string, Promise<any>>();
   private async cached<T>(key: string, task: () => Promise<T>): Promise<T> {
@@ -156,56 +179,73 @@ export class Agent {
     if (this.detailsPending.has(key)) return this.detailsPending.get(key)!;
     const pending = task().then(value => {
       // Bound memory even when users explore many custom windows.
-      if (this.detailsCache.size >= 64) this.detailsCache.delete(this.detailsCache.keys().next().value!);
+      for (const [key, value] of this.detailsCache) if (Date.now() - value.time > 30000) this.detailsCache.delete(key);
+      if (this.detailsCache.size >= 16) this.detailsCache.delete(this.detailsCache.keys().next().value!);
       this.detailsCache.set(key, { value, time: Date.now() });
       return value;
     }).finally(() => this.detailsPending.delete(key));
     this.detailsPending.set(key, pending);
     return pending;
   }
-  private agentPolicy?: Promise<TargetPolicy>;
+  private activeRequests = 0;
+  private requestQueue: (() => void)[] = [];
   private async request(path: string, params: Record<string, string> = {}) {
-    const url = new URL(path, this.config.url);
-    Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
-    const token = this.config.tokenEnv ? process.env[this.config.tokenEnv] : undefined;
-    const target = CheckSchema.parse({id: this.config.id, name: this.config.name, hostId: this.config.id, type: 'http', url: this.config.url});
-    if (!this.agentPolicy) {
-      const host = url.hostname.replace(/^\[|\]$/g, '');
-      this.agentPolicy = (async () => {
-        const addresses = this.config.addresses ?? (isIP(host) ? [host] : (await Promise.race([
-          lookup(host, {all: true, verbatim: true}),
-          new Promise<never>((_, reject) => { const timer = setTimeout(() => reject(Error('Agent DNS timed out')), 3000); timer.unref(); }),
-        ])).map(a => a.address));
-        return new TargetPolicy([{host, port: Number(url.port || (url.protocol === 'https:' ? 443 : 80)), addresses}]);
-      })().catch(error => { this.agentPolicy = undefined; throw error; });
-    }
-    const address = await (await this.agentPolicy).address(target);
-    const response = await pinnedRequest(url, token ? {Authorization: `Bearer ${token}`} : {}, AbortSignal.timeout(6000), address, 16 * 1024 * 1024);
-    if (!response.ok) throw new Error(`Agent returned HTTP ${response.status}`);
-    return response.json();
+    if (this.activeRequests >= 3) {
+      if (this.requestQueue.length >= 64) throw Error('Agent request capacity reached');
+      await new Promise<void>(resolve => this.requestQueue.push(resolve));
+    } else this.activeRequests++;
+    const run = () => agentSlot(async () => {
+      this.stopped.signal.throwIfAborted();
+      const url = new URL(path, this.config.url);
+      Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
+      const { address, token } = await (await this.trust).destination(this.config.url);
+      const response = await pinnedRequest(url, token ? { Authorization: `Bearer ${token}` } : {}, AbortSignal.any([AbortSignal.timeout(6000), this.stopped.signal]), address, (path.endsWith('/charts') ? 16 : 4) * 1024 * 1024);
+      if (!response.ok) throw new Error(`Agent returned HTTP ${response.status}`);
+      const value = await response.json();
+      this.lastCommunication = new Date().toISOString();
+      return value;
+    });
+    try { return await (path.endsWith('/charts') ? chartSlot(run) : run()); } finally { const next = this.requestQueue.shift(); if (next) next(); else this.activeRequests--; }
   }
+  private metaPending?: Promise<Meta>;
   private async meta(): Promise<Meta> {
-    if (this.metadata && Date.now() - this.metadata.time < 60_000) return this.metadata;
-    const response = await this.request('/api/v3/nodes');
-    const matches: NodeInfo[] =
-      response.nodes?.filter((n: NodeInfo) => [n.mg, n.nd, n.nm].includes(this.config.node)) || [];
+    if (this.metadata && Date.now() - this.metadata.time < 300_000) return this.metadata;
+    if (this.metaPending) return this.metaPending;
+    this.metaPending = this.fetchMeta().finally(() => { this.metaPending = undefined; });
+    return this.metaPending;
+  }
+  private async fetchMeta(): Promise<Meta> {
+    if (this.metadata && Date.now() - this.metadata.time < 300_000) return this.metadata;
+    const nodes = await this.nodeList();
+    const matches = nodes.filter(n => [n.mg, n.nd, n.nm].includes(this.config.node));
     if (matches.length > 1)
       throw new Error('Node selector is ambiguous; configure a machine GUID instead');
     const node = matches[0];
     if (!node) throw new Error('Configured node was not found on this Agent');
-    const [charts, contexts] = await Promise.all([
+    const [chartResult, contextResult] = await Promise.allSettled([
       this.request(`/host/${encodeURIComponent(node.mg)}/api/v1/charts`),
       this.request('/api/v3/contexts', { nodes: node.mg }),
     ]);
+    const warnings: string[] = [];
+    const charts = chartResult.status === 'fulfilled' ? chartResult.value : (warnings.push('Chart instance metadata unavailable'), { charts: {}, hostname: node.nm });
+    const contexts = contextResult.status === 'fulfilled' ? contextResult.value : (warnings.push('Metric contexts unavailable; using chart contexts'), { contexts: Object.fromEntries(Object.values(charts.charts || {}).map((c: any) => [c.context, {}])) });
+    if (!charts.charts || typeof charts.charts !== 'object' || Array.isArray(charts.charts) || Object.keys(charts.charts).length > 20000 || !contexts.contexts || typeof contexts.contexts !== 'object' || Array.isArray(contexts.contexts) || Object.keys(contexts.contexts).length > 10000) throw Error('Invalid Netdata metadata response');
+    if (chartResult.status === 'rejected' && contextResult.status === 'rejected') throw chartResult.reason;
+    for (const [id, chart] of Object.entries(charts.charts) as [string, any][]) {
+      if (!chart || typeof chart.context !== 'string' || typeof chart.id !== 'string' || chart.id !== id || typeof chart.family !== 'string' || typeof chart.units !== 'string' || (chart.chart_labels && (typeof chart.chart_labels !== 'object' || Object.values(chart.chart_labels).some(v => typeof v !== 'string')))) throw Error('Invalid Netdata chart response');
+    }
     if (charts.hostname !== node.nm)
       throw new Error('Agent returned metadata for an unexpected host');
-    this.metadata = {
+    const metadata: Meta = {
       node,
-      charts: charts.charts,
-      contexts: contexts.contexts || {},
+      charts: Object.fromEntries(Object.entries(charts.charts).map(([id, c]: [string, any]) => [id, { id: c.id, context: c.context, family: c.family, units: c.units, chart_labels: c.chart_labels || {}, plugin: c.plugin, module: c.module, dimensions: c.dimensions }])),
+      contexts: Object.fromEntries(Object.keys(contexts.contexts).map(c => [c, true])),
       time: Date.now(),
+      warnings,
     };
-    return this.metadata;
+    this.onDiscovery?.(discovery(metadata));
+    this.metadata = metadata;
+    return metadata;
   }
   private async data(meta: Meta, context: string, seconds: number, points: number, extra: Record<string, string> = {}): Promise<Table> {
     const data = await this.request('/api/v3/data', {
@@ -230,11 +270,7 @@ export class Agent {
       .catch((error) =>
         empty(
           this.config,
-          error instanceof Error && error.name === 'TimeoutError'
-            ? 'Agent request timed out'
-            : error instanceof Error && /^(Agent returned HTTP \d{3}$|Node selector is ambiguous|Configured node was not found)/.test(error.message)
-              ? error.message
-              : 'Agent connection failed. Check the endpoint, DNS, firewall and Agent access permissions.',
+          agentDiagnostic(error).message,
           this.snapshot?.host.lastSeen,
         ),
       )
@@ -252,6 +288,8 @@ export class Agent {
       now = Date.now() / 1000;
     const host = empty(this.config, '');
     host.error = null;
+    host.discovery = discovery(meta);
+    host.warnings.push(...(meta.warnings || []));
     host.hostname = meta.node.nm;
     host.version = meta.node.v;
     host.os = meta.node.os ? `${meta.node.os.nm} ${meta.node.os.v}` : null;
@@ -561,4 +599,34 @@ export class Agent {
     });
   }
 
+}
+
+export function agentDiagnostic(error: unknown): { code: string; message: string } {
+  const e = error as { message?: string; name?: string; code?: string; cause?: { code?: string } };
+  const message = e?.message || '', code = e?.cause?.code || e?.code || '';
+  if (/Destination/.test(message)) return { code: 'policy', message: 'Destination blocked by Hostboard policy. Ask the deployment operator to approve this Agent origin and its IP addresses in private/agents.json, then restart Hostboard.' };
+  if (/authentication is not configured/.test(message)) return { code: 'authentication', message: 'Agent authentication is not configured. Ask the deployment operator to check the private token configuration.' };
+  if (/HTTP (401|403)/.test(message)) return { code: 'authentication', message: 'Agent denied access. Check Agent authorization and deployment-managed credentials.' };
+  if (/HTTP 3\d\d/.test(message)) return { code: 'redirect', message: 'Agent redirected the request. Enter the final approved HTTP(S) origin; redirects are not followed.' };
+  if (/CERT|TLS|SSL|SELF_SIGNED|UNABLE_TO_VERIFY/.test(code)) return { code: 'tls', message: 'TLS certificate verification failed. Check the Agent certificate and trusted certificate chain.' };
+  if (/ENOTFOUND|EAI_AGAIN/.test(code)) return { code: 'dns', message: 'DNS resolution failed. Check the Agent hostname and DNS configuration.' };
+  if (/Timeout|Abort/.test(e?.name || '') || /timed out/.test(message) || code === 'ETIMEDOUT') return { code: 'timeout', message: 'Agent connection timed out. Check connectivity, Docker networking and firewall rules.' };
+  if (code === 'ECONNREFUSED') return { code: 'refused', message: 'Connection refused. Check the Agent address, port and listening interface.' };
+  if (/node|host|identity|already registered/i.test(message) && /Configured|ambiguous|unexpected|identity|already registered/.test(message)) return { code: 'identity', message: 'Incorrect, ambiguous or duplicate node identity. Select the original machine GUID or restore its existing registration.' };
+  if (error instanceof z.ZodError || error instanceof SyntaxError || /Invalid Netdata|HTTP|Response too large/.test(message)) return { code: 'response', message: 'Incompatible or unexpected Agent API response. Hostboard requires Netdata v3 nodes, contexts and data APIs; check the URL and Agent version.' };
+  return { code: 'connection', message: 'Agent connection failed. Check the address, routing and firewall rules.' };
+}
+function discovery(meta: Meta): ServerDiscovery {
+  const n = meta.node, labels = n.labels || {}, charts = Object.values(meta.charts);
+  const text = (value: unknown) => typeof value === 'string' && value.length ? value.slice(0, 512) : null;
+  const positive = (value: unknown) => Number.isFinite(Number(value)) && Number(value) > 0 ? Number(value) : null;
+  const contexts = Object.keys(meta.contexts).sort();
+  const categories = Object.entries({ 'CPU & load': /^(system\.(cpu|load)|cpu\.)/, 'Memory & swap': /^(system\.ram|mem\.)/, 'Storage': /^(disk\.|system\.io)/, 'Network': /^(net\.|system\.net)/, 'Temperatures': /temperature/, 'Docker': /^(docker\.|cgroup\.)/, 'Pressure': /pressure/, 'Alerts': /^netdata\.alarm/ }).filter(([, pattern]) => contexts.some(c => (pattern as RegExp).test(c))).map(([name]) => name);
+  if (n.health?.status) categories.push('Alerts');
+  return { guid: n.mg, nodeId: n.nd || null, hostname: n.nm, os: text([n.os?.nm, n.os?.v].filter(Boolean).join(' ')), kernel: text([n.os?.kernel?.nm, n.os?.kernel?.v].filter(Boolean).join(' ')) || text(labels._kernel_version), cpuModel: text(labels._system_cpu_model), cores: positive(n.hw?.cpus || labels._system_cores), memoryBytes: positive(n.hw?.memory || labels._system_ram_total), version: text(n.v), contexts, categories,
+    collectors: [...new Set(charts.flatMap(c => [(c as any).plugin, (c as any).module].filter(v => typeof v === 'string')))].sort(),
+    filesystems: charts.filter(c => c.context === 'disk.space').map(c => ({ id: c.id, mount: c.chart_labels?.mount_point || c.family, filesystem: c.chart_labels?.filesystem || '' })),
+    interfaces: [...new Set(charts.filter(c => c.context === 'net.net').map(c => c.chart_labels?.interface || c.family))],
+    sensors: charts.filter(c => /temperature/.test(c.context)).map(c => c.chart_labels?.label || c.family),
+    chartCount: charts.length, discoveredAt: new Date(meta.time).toISOString(), warnings: meta.warnings || [] };
 }
