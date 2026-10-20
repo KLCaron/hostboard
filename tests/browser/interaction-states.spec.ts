@@ -130,7 +130,7 @@ test("chart and overview presets use visible controlled states, pending custom i
   ).toHaveAttribute("aria-pressed", "true");
 });
 
-test('all six sections share semantic navigation, discoverable resting actions and keyboard tabs', async ({page, context}, info) => {
+test('all seven sections share semantic navigation, discoverable resting actions and keyboard tabs', async ({page, context}, info) => {
   const errors: string[] = [];
   page.on('pageerror', e => errors.push(e.message));
   await page.goto('/');
@@ -183,7 +183,7 @@ test('all six sections share semantic navigation, discoverable resting actions a
   await expect(page.getByRole('tab',{name:'Active',exact:true})).toHaveAttribute('aria-selected','true');
   await expect(nav.getByRole('link',{name:'Issues',exact:true})).toHaveAttribute('aria-current','page');
   await page.screenshot({animations:"disabled",path:`.ai-local/v062/${info.project.name}-issues-selected.png`,fullPage:true});
-  for (const name of ['Overview','Servers','Services','Logs','Issues','Settings']) {
+  for (const name of ['Overview','Servers','Services','Updates','Logs','Issues','Settings']) {
     const target = nav.getByRole('link',{name,exact:true});
     await target.click();
     await expect(target).toHaveAttribute('aria-current','page');

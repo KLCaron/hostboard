@@ -2035,3 +2035,22 @@ label:has(input[type=checkbox]) { min-height: 32px; }
 @media (max-width: 600px) { .host-information { grid-template-columns: 1fr; gap: 6px; } .host-information dd { margin-bottom: 8px; } }
 
 .server-filter .check-label, .settings-actions > .check-label { display: flex; align-items: center; gap: 8px; }
+
+/* Read-only update monitoring */
+.update-counts { display: flex; flex-wrap: wrap; gap: .4rem 1rem; font-size: .8rem; }
+.security-text { color: #f0a6a6; font-weight: 600; }
+.host-update-summary { margin: 0 1.25rem .9rem; display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+.update-host { margin: 1rem 0; }
+.update-host > summary { display: flex; flex-wrap: wrap; gap: .6rem 1.25rem; align-items: center; }
+.update-body { padding: 1rem; min-width: 0; }
+.update-body h3 { margin-top: 1.5rem; }
+.update-badge { display: inline-block; border: 1px solid currentColor; border-radius: .4rem; padding: .1rem .4rem; font-size: .75rem; }
+.update-badge.ok, .update-badge.current { color: #bbdf93; }
+.update-badge.update { color: #e4ac72; }
+.update-badge.stale, .update-badge.unavailable, .update-badge.unsupported, .update-badge.local, .update-badge.pinned { color: #b9b7c8; }
+.update-table { overflow: auto; max-height: 32rem; margin-top: 1rem; }
+.update-table table { width: 100%; border-collapse: collapse; text-align: left; }
+.update-table th, .update-table td { padding: .6rem; border-bottom: 1px solid #ffffff18; overflow-wrap: anywhere; min-width: 8rem; }
+.update-service { margin-top: .75rem; }
+.update-service > div { padding: .5rem 1rem; }
+.update-service p, .update-service code { overflow-wrap: anywhere; word-break: break-word; }

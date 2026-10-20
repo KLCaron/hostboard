@@ -36,6 +36,15 @@ try {
   await expect(page.getByRole('heading',{name:'Fleet overview'})).toBeVisible();
   await expect(page.locator('.host-card').first().getByText('Online',{exact:true})).toBeVisible({timeout:15000});
   await page.screenshot({path:`${output}/${name}.png`,fullPage:true});
+  await page.getByRole('link',{name:'Updates',exact:true}).first().click();
+  await expect(page.getByRole('heading',{name:'Updates',exact:true})).toBeVisible();
+  const updates=await (await page.request.get(origin+'/api/admin/updates')).json();
+  expect(updates.hosts[0].hostId).toBe('server-a');
+  expect(updates.hosts[0].detailsIncluded).toBe(false);
+  expect(updates.hosts[0].configured).toBe(false);
+  expect((await page.request.get(origin+'/api/admin/updates/server-a')).status()).toBe(200);
+  await page.getByText('Example server',{exact:true}).click();
+  await expect(page.getByRole('button',{name:'Refresh Status',exact:true})).toBeDisabled();
   await page.getByRole('link',{name:'Settings',exact:true}).click();
   await expect(page.getByRole('link',{name:'Sign out',exact:true})).toBeVisible();
   expect((await page.request.get(origin+'/api/admin/config')).status()).toBe(200);
@@ -48,9 +57,10 @@ try {
   await page.getByRole('button',{name:'Sign out',exact:true}).click();
   await expect(page.getByRole('heading',{name:'Administrator sign in'})).toBeVisible();
   expect((await page.request.get(origin+'/api/admin/config')).status()).toBe(401);
+  expect((await page.request.get(origin+'/api/admin/updates')).status()).toBe(401);
   expect(errors).toEqual([]);await context.close();
  }
- console.log('PASS: container image Firefox desktop/mobile sign-in, real dashboard/Agent, Settings administrator access/writes, sign-out, and unauthenticated denial.');
+ console.log('PASS: container image Firefox desktop/mobile sign-in, real dashboard/Agent, Settings administrator access/writes, read-only Updates summary/detail routes, sign-out, and unauthenticated denial.');
 } finally {
  if(browser)await browser.close();
  try{compose(['down','--volumes','--remove-orphans']);}finally{rmSync(dir,{recursive:true,force:true});}

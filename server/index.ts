@@ -1,4 +1,7 @@
 import express from "express";
+import {
+  Updates, loadUpdateConfig, SSHUpdateProvider, updatesAPI,
+} from "./updates.js";
 import { Servers } from "./servers.js";
 import { loadAgentTrust } from "./agent-policy.js";
 import { readFileSync } from "node:fs";
@@ -36,6 +39,10 @@ const monitor = new Monitor(
   smtpDelivery(() => configuration.settings().notifications),
 );
 const registry = new Servers(configuration, await loadAgentTrust(bootstrap), bootstrap);
+const updateConfig = loadUpdateConfig(registry.ids());
+const updates = new Updates(
+  configuration, () => registry.records(), updateConfig, new SSHUpdateProvider(updateConfig),
+);
 const logConfig = loadLogConfig(registry.ids());
 registry.setLoggingHosts(logConfig.hosts.map(h => h.hostId));
 synchronize(configuration, monitor);
@@ -87,6 +94,7 @@ app.use(
     bootstrapTargets(seed.checks),
   ),
 );
+app.use("/api/admin/updates", updatesAPI(updates, admin));
 app.use("/api/admin/servers", registry.api(admin));
 app.use("/api/admin/logs", logsAPI(configuration, monitor, admin, () => registry.ids(), new SSHLogProvider(logConfig)));
 app.get("/api/system", async (_req, res) => {
@@ -274,6 +282,7 @@ app.get(
     "/overview",
     "/servers",
     "/services",
+    "/updates",
     "/issues",
     "/settings",
     "/alerts",
@@ -307,10 +316,14 @@ const servers = addresses.map((address) =>
       `Hostboard listening on ${address}:${port}; ${registry.ids().length} hosts configured`,
     );
     // Self-checks must not race the HTTP listeners during startup.
-    if (++listening === addresses.length) monitor.start();
+    if (++listening === addresses.length) {
+      monitor.start();
+      updates.start();
+    }
   }),
 );
 process.on("SIGTERM", () => {
+  updates.stop();
   monitor.stop();
   stopSessions();
   let remaining = servers.length;

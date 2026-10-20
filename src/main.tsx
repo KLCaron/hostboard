@@ -1,3 +1,5 @@
+import { UpdatesPage, UpdateSummary, updateHealth, useUpdates } from "./Updates";
+import type { HostUpdates } from "./update-types";
 import { DiscoverySummary } from "./ServerSettings";
 import { TabList } from "./TabList";
 import { LogsPage } from './Logs';
@@ -204,6 +206,7 @@ function Meter({
 }
 function HostCard({
   host,
+  updates,
   history,
   range,
   expanded,
@@ -211,6 +214,7 @@ function HostCard({
   onInvestigate,
 }: {
   host: Host;
+  updates?: HostUpdates;
   history?: History;
   range: Range;
   expanded: boolean;
@@ -279,6 +283,10 @@ function HostCard({
         ) : (
           <span className="muted">{host.hostname}</span>
         )}
+      </div>
+      <div className="host-update-summary">
+        <a className="text-link" href={`#updates?host=${encodeURIComponent(host.id)}`}>Updates</a>
+        {updates ? <><UpdateSummary host={updates} /><span className="muted small">{updateHealth(updates)}</span></> : <span className="muted small">Status unavailable</span>}
       </div>
       <div className="metric-pair">
         <div className="metric-block">
@@ -525,6 +533,7 @@ function HostCard({
   );
 }
 function App() {
+  const updates = useUpdates();
   const display = useDisplay();
   const [fleet, setFleet] = useState<Fleet>(),
     [histories, setHistories] = useState<Record<string, History>>({}),
@@ -820,6 +829,7 @@ function App() {
       node: (
         <HostCard
           host={host}
+          updates={updates.error ? undefined : updates.hosts.find(h => h.hostId === host.id)}
           history={histories[host.id]}
           range={range}
           expanded={expanded === host.id}
@@ -851,6 +861,7 @@ function App() {
               servers: Server,
               services: Activity,
               logs: ScrollText,
+              updates: RefreshCw,
               issues: Bell,
               settings: SettingsIcon,
             }[value];
@@ -994,6 +1005,7 @@ function App() {
                       <HostCard
                         key={host.id}
                         host={host}
+                        updates={updates.error ? undefined : updates.hosts.find(h => h.hostId === host.id)}
                         history={histories[host.id]}
                         range={range}
                         expanded={expanded === host.id}
@@ -1043,6 +1055,9 @@ function App() {
               error={monitoring.error}
               onInvestigate={setTarget}
             />
+          )}
+          {page === "updates" && (
+            <UpdatesPage hosts={updates.hosts} error={updates.error} groups={fleet?.groups || []} />
           )}
           {page === "settings" && (
             <Settings

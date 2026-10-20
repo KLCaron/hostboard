@@ -33,3 +33,7 @@ Optional log retrieval always requires server-side administrator authorization, 
 ## Release checks
 
 CI performs TypeScript/backend/watchdog/build tests, Firefox desktop/mobile regression tests, controlled Compose installation/recovery tests, npm vulnerability checks and a locked-dependency license review. Actions are pinned and use minimal permissions; pull requests never receive production credentials. Published images include source labels, version, digest, provenance and SBOM. The release acceptance additionally verifies deployed monitoring and a recoverable database/image checkpoint. See [dependency notes](docs/dependencies.md) and [operations](docs/operations.md).
+
+## Update Monitor
+
+The Update Monitor is permanently observation-only. Its administrator-only APIs read scheduled snapshots; no install, upgrade, pull, deployment, restart, arbitrary command or remote collection trigger is provided. The separate SSH reader has no Docker/sudo rights and can read only a root-owned bounded snapshot. The optional trusted local producer needs Docker daemon access; review this residual root-equivalent privilege before installing it. Registry credentials remain host-local and registry/token/CDN destinations require explicit approval. See [the complete boundary and setup](docs/updates.md).

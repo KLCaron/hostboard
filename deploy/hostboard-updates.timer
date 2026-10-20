@@ -1,0 +1,11 @@
+[Unit]
+Description=Check Hostboard update status every six hours
+
+[Timer]
+OnBootSec=5min
+OnUnitInactiveSec=6h
+RandomizedDelaySec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
