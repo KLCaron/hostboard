@@ -188,4 +188,13 @@ test("update cards prioritize security, expose names, filter fleet totals and re
     path: `.ai-local/update-details-${test.info().project.name}.png`,
     fullPage: true,
   });
+  host.snapshot!.docker.services[0].image =
+    "lscr.io/linuxserver/qbittorrent:latest";
+  host.snapshot!.docker.services[0].message =
+    "Registry is not approved in collector configuration";
+  await page.reload();
+  await page.locator(".update-service > summary").click();
+  await expect(
+    page.getByRole("link", { name: "Configure registry approval for lscr.io" }),
+  ).toHaveAttribute("href", "#settings?tab=updates&host=server-a");
 });

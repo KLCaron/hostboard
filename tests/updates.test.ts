@@ -282,6 +282,106 @@ test("API requires signed administrator identity, same-origin JSON refresh and h
     "Content-Type": "application/json",
   };
   assert.equal((await fetch(endpoint, { headers })).status, 200);
+  assert.equal((await fetch(endpoint + "/settings")).status, 403);
+  assert.equal(
+    (
+      await fetch(endpoint + "/settings", {
+        headers: { "Cf-Access-Jwt-Assertion": "forged" },
+      })
+    ).status,
+    403,
+  );
+  const settingsInput = {
+    revision: f.store.revision(),
+    intervalSeconds: 7200,
+    staleSeconds: 86400,
+  };
+  for (const badHeaders of [
+    {},
+    { ...headers, Origin: "https://evil.example" },
+    { ...headers, "X-Hostboard-Request": "" },
+  ]) {
+    assert.equal(
+      (
+        await fetch(endpoint + "/settings", {
+          method: "PUT",
+          headers: badHeaders,
+          body: JSON.stringify(settingsInput),
+        })
+      ).status,
+      403,
+    );
+    assert.equal(
+      (
+        await fetch(endpoint + "/settings/hosts/host", {
+          method: "PUT",
+          headers: badHeaders,
+          body: JSON.stringify({
+            revision: f.store.revision(),
+            host: { enabled: false, proposedRegistries: [] },
+          }),
+        })
+      ).status,
+      403,
+    );
+  }
+  const put = (path: string, body: unknown) =>
+    fetch(endpoint + path, {
+      method: "PUT",
+      headers,
+      body: JSON.stringify(body),
+    });
+  assert.equal((await put("/settings", settingsInput)).status, 200);
+  assert.equal((await put("/settings", settingsInput)).status, 409);
+  for (const patch of [
+    { intervalSeconds: 1 },
+    { staleSeconds: 100 },
+    { address: "8.8.8.8" },
+    { command: "exec" },
+  ])
+    assert.equal(
+      (
+        await put("/settings", {
+          ...settingsInput,
+          revision: f.store.revision(),
+          ...patch,
+        })
+      ).status,
+      400,
+    );
+  assert.equal(
+    (
+      await put("/settings/hosts/unknown", {
+        revision: f.store.revision(),
+        host: { enabled: true, proposedRegistries: [] },
+      })
+    ).status,
+    404,
+  );
+  for (const extra of [
+    { address: "8.8.8.8" },
+    { password: "secret" },
+    { tokenRealms: ["https://evil.example"] },
+  ])
+    assert.equal(
+      (
+        await put("/settings/hosts/host", {
+          revision: f.store.revision(),
+          host: { enabled: true, proposedRegistries: [], ...extra },
+        })
+      ).status,
+      400,
+    );
+  assert.equal(
+    (
+      await put("/settings/hosts/host", {
+        revision: f.store.revision(),
+        host: { enabled: true, proposedRegistries: ["lscr.io"] },
+      })
+    ).status,
+    200,
+  );
+  assert.equal((await fetch(endpoint + "/settings", { headers })).status, 200);
   assert.equal(
     (
       await fetch(endpoint + "/host/refresh", {
@@ -363,6 +463,7 @@ test("local administrator sessions protect update reads and refresh CSRF boundar
   });
   const endpoint = url + "/api/admin/updates";
   assert.equal((await fetch(endpoint)).status, 401);
+  assert.equal((await fetch(endpoint + "/settings")).status, 401);
   const loginPage = await fetch(url + "/auth/login");
   const csrf = (await loginPage.text()).match(
     /name="csrf" value="([a-f0-9]+)"/,
@@ -384,6 +485,46 @@ test("local administrator sessions protect update reads and refresh CSRF boundar
   });
   assert.equal(login.status, 303);
   const cookie = login.headers.get("set-cookie")!.split(";")[0];
+  assert.equal(
+    (await fetch(endpoint + "/settings", { headers: { Cookie: cookie } }))
+      .status,
+    200,
+  );
+  const body = JSON.stringify({
+    revision: f.store.revision(),
+    intervalSeconds: 7200,
+    staleSeconds: 86400,
+  });
+  assert.equal(
+    (
+      await fetch(endpoint + "/settings", {
+        method: "PUT",
+        headers: {
+          Cookie: cookie,
+          Origin: url,
+          "Content-Type": "application/json",
+        },
+        body,
+      })
+    ).status,
+    403,
+  );
+  assert.equal(
+    (
+      await fetch(endpoint + "/settings", {
+        method: "PUT",
+        headers: {
+          Cookie: cookie,
+          Origin: url,
+          "Content-Type": "application/json",
+          "X-Hostboard-Request": "1",
+        },
+        body,
+      })
+    ).status,
+    200,
+  );
+
   assert.equal(
     (await fetch(endpoint, { headers: { Cookie: cookie } })).status,
     200,
@@ -447,6 +588,13 @@ test("on-disk observations survive SQLite close/reopen and previous schema-4 mon
   const provider = { read: async () => updateSample() };
   const updates = new Updates(store, () => [host], config, provider);
   assert(await updates.refresh("host"));
+  updates.savePreferences(store.revision(), "operator", {
+    ...updates.preferences(),
+    intervalSeconds: 7200,
+    hosts: { host: { enabled: false, proposedRegistries: ["lscr.io"] } },
+  });
+  const savedPreferences = updates.preferences();
+  const legacySettings = store.settings();
   const first = updates.view()[0];
   updates.stop();
   monitor.stop();
@@ -456,6 +604,9 @@ test("on-disk observations survive SQLite close/reopen and previous schema-4 mon
   monitor = new Monitor(store.runtime(), store.db, null);
   host.name = "Renamed host";
   const reopened = new Updates(store, () => [host], config, provider);
+  assert.deepEqual(reopened.preferences(), savedPreferences);
+  assert.deepEqual(store.settings(), legacySettings);
+  assert.equal(reopened.view()[0].paused, true);
   assert.equal(reopened.view()[0].name, "Renamed host");
   assert.deepEqual(reopened.view()[0].snapshot, first.snapshot);
   assert.equal(store.db.prepare("PRAGMA quick_check").get()!.quick_check, "ok");
@@ -661,4 +812,141 @@ test("a damaged legacy inventory cannot stop preview backfill or other monitorin
   t.after(() => restarted.stop());
   assert.equal(restarted.view(false)[0].counts!.total, 2);
   assert.equal(restarted.view(false)[1].preview!.packages.length, 2);
+});
+
+test("registry proposals validate exact hosts, isolate host policy and never initiate collection", async (t) => {
+  const { validRegistry, imageRegistry } = await import(
+    "../src/update-settings.js"
+  );
+  for (const v of ["lscr.io", "registry.example.com:5000", "a-b.example:65535"])
+    assert(validRegistry(v), v);
+  for (const v of [
+    "*.io",
+    "https://lscr.io",
+    "lscr.io/path",
+    "user@lscr.io",
+    "lscr.io:0",
+    "lscr.io:65536",
+    "lscr.io:443/path",
+    "127.0.0.1",
+    "[::1]",
+    "evil..example",
+    "-bad.example",
+    "bad_.example",
+    "UPPER.example",
+    "lscr.io\n",
+    "lscr.io.",
+    "localhost",
+    "lscr.io:0443",
+  ])
+    assert(!validRegistry(v), v);
+  assert.equal(imageRegistry("ubuntu:latest"), "registry-1.docker.io");
+  assert.equal(imageRegistry("docker.io/library/a:v1"), "registry-1.docker.io");
+  assert.equal(imageRegistry("lscr.io/a/b:latest"), "lscr.io");
+  const f = fixture(t),
+    original = structuredClone(f.config),
+    oldSettings = f.store.settings();
+  const sample = updateSample();
+  sample.docker.state = "unavailable";
+  sample.docker.services[0] = {
+    ...sample.docker.services[0],
+    image: "lscr.io/linuxserver/qbittorrent:latest",
+    state: "unavailable",
+    message: "Registry is not approved in collector configuration",
+    checkedAt: null,
+  };
+  f.set(sample);
+  await f.updates.refresh("host");
+  const before = f.updates.settingsView();
+  assert.equal(before.hosts[0].policy, null); // Legacy collectors do not report approvals.
+  assert.equal(before.hosts[0].missing[0].registry, "lscr.io");
+  const calls = f.calls,
+    rev = f.store.revision();
+  f.updates.savePreferences(rev, "operator", {
+    ...f.updates.preferences(),
+    hosts: { host: { enabled: false, proposedRegistries: ["lscr.io"] } },
+  });
+  assert.equal(f.calls, calls);
+  assert.deepEqual(f.config, original);
+  assert.deepEqual(f.store.settings(), oldSettings);
+  assert.equal(f.updates.view()[0].paused, true);
+  assert.equal(f.updates.view()[1].paused, false);
+  assert.equal(await f.updates.refresh("host"), false);
+  assert.equal(f.updates.settingsView().hosts[0].policy, null);
+  assert.throws(
+    () => f.updates.savePreferences(rev, "operator", f.updates.preferences()),
+    /elsewhere/,
+  );
+  const saved = f.updates.preferences();
+  for (const proposedRegistries of [["*.example.com"], ["lscr.io", "lscr.io"]])
+    assert.throws(() =>
+      f.updates.savePreferences(f.store.revision(), "operator", {
+        ...saved,
+        hosts: { host: { enabled: true, proposedRegistries } },
+      }),
+    );
+  assert.throws(
+    () =>
+      f.updates.savePreferences(f.store.revision(), "operator", {
+        ...saved,
+        hosts: { unknown: { enabled: true, proposedRegistries: [] } },
+      }),
+    /Unknown/,
+  );
+  assert.deepEqual(f.updates.preferences(), saved);
+  assert(
+    f.store.db
+      .prepare("SELECT action FROM config_audit")
+      .all()
+      .some((r) => String(r.action).includes("host policy unchanged")),
+  );
+});
+test("collector reports are optional, sanitized, identity-bound and marked stale; timing applies immediately", async (t) => {
+  const f = fixture(t),
+    sample = {
+      ...updateSample(),
+      collector: {
+        approvedRegistries: ["registry-1.docker.io"],
+        packageStaleSeconds: 86400,
+      },
+    };
+  assert(SnapshotSchema.safeParse(sample).success);
+  assert(
+    !SnapshotSchema.safeParse({
+      ...sample,
+      collector: { ...sample.collector, password: "secret" },
+    }).success,
+  );
+  f.set(sample);
+  await f.updates.refresh("host");
+  assert.deepEqual(f.updates.settingsView().hosts[0].policy, sample.collector);
+  f.updates.savePreferences(f.store.revision(), "operator", {
+    ...f.updates.preferences(),
+    intervalSeconds: 3600,
+    staleSeconds: 21600,
+  });
+  f.advance(3601);
+  const calls = f.calls;
+  await f.updates.tick();
+  assert(f.calls > calls); // Uses GUI timing rather than deployment default.
+  f.advance(21601);
+  assert.equal(f.updates.settingsView().hosts[0].policyStale, true);
+  f.records[0].guid = "replacement-guid";
+  assert.equal(f.updates.settingsView().hosts[0].policy, null);
+});
+test("pausing during a snapshot read prevents its result from becoming active", async (t) => {
+  const f = fixture(t);
+  let complete!: (value: unknown) => void;
+  const u = new Updates(f.store, () => f.records, f.config, {
+    read: () => new Promise((r) => (complete = r)),
+  });
+  const pending = u.refresh("host");
+  u.savePreferences(f.store.revision(), "operator", {
+    ...u.preferences(),
+    hosts: { host: { enabled: false, proposedRegistries: [] } },
+  });
+  complete(updateSample());
+  await pending;
+  assert.equal(u.view()[0].snapshot, null);
+  u.stop();
 });

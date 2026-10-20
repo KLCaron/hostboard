@@ -2292,3 +2292,12 @@ label:has(input[type=checkbox]) { min-height: 32px; }
   .updates-fleet > div { gap: .25rem; padding: .65rem .5rem; }
   .updates-fleet span { font-size: .7rem; }
 }
+
+.update-settings {display:grid;gap:20px;min-width:0;}
+.update-settings .monitor-panel {min-width:0;overflow-wrap:anywhere;}
+.update-settings label:not(.check-label) {display:flex;flex-direction:column;gap:8px;min-width:0;max-width:900px;}
+.update-settings input:not([type=checkbox]),.update-settings select {background:#12161d;border:1px solid #39424b;border-radius:7px;padding:10px;color:#d4dae1;width:100%;min-width:0;}
+.update-settings li {margin:10px 0;}
+.update-operator-guide {margin-top:20px;}
+.update-operator-guide summary {cursor:pointer;}
+.update-operator-guide pre {white-space:pre-wrap;overflow-wrap:anywhere;background:#12161d;padding:16px;border-radius:7px;}

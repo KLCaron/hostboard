@@ -355,6 +355,8 @@ def snapshot(config):
     packages = collect_packages(config.get('staleSeconds', 86400))
     docker = collect_docker(config.get('registries', {'registry-1.docker.io': {'tokenRealms': ['https://auth.docker.io/token'], 'blobRedirectHosts': ['production.cloudfront.docker.com', 'production.cloudflare.docker.com']}}))
     return dict(version=1, hostId=config['hostId'], nodeGuid=config['nodeGuid'],
+                collector=dict(approvedRegistries=sorted(config.get('registries', {'registry-1.docker.io': {}})),
+                               packageStaleSeconds=config.get('staleSeconds', 86400)),
                 collectedAt=time.time(), packages=packages, docker=docker)
 
 

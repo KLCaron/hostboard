@@ -40,6 +40,7 @@ export interface DockerStatus {
 }
 export interface UpdateSnapshot {
   version: 1;
+  collector?: { approvedRegistries: string[]; packageStaleSeconds: number };
   hostId: string;
   nodeGuid: string;
   collectedAt: number;

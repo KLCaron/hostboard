@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { approvalMissing, imageRegistry } from "./update-settings";
 import { useEffect, useRef, useState } from "react";
 import type { ServerGroup } from "./server-types";
 import { updateCounts, type HostUpdates } from "./update-types";
@@ -135,9 +136,7 @@ export function UpdateSummary({ host }: { host: HostUpdates }) {
 }
 export function updateHealth(h: HostUpdates) {
   if (h.paused)
-    return h.archived
-      ? "Archived · polling stopped"
-      : "Disabled · polling stopped";
+    return h.archived ? "Archived · polling stopped" : "Snapshot reads paused";
   if (!h.configured) return "Not configured";
   if (h.error) return "Snapshot read failed · last observations below";
   if (!h.snapshot) return "Awaiting first snapshot";
@@ -284,6 +283,14 @@ function UpdateDetails({
               {s.image} · {s.platform}
             </p>
             <p>{s.message}</p>
+            {approvalMissing(s) && (
+              <a
+                className="text-link"
+                href={`#settings?tab=updates&host=${encodeURIComponent(h.hostId)}`}
+              >
+                Configure registry approval for {imageRegistry(s.image)}
+              </a>
+            )}
             <p>
               Container: <code>{s.container}</code>
             </p>

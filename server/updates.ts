@@ -1,4 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import {
+  validRegistry,
+  imageRegistry,
+  approvalMissing,
+  type UpdatePreferences,
+  type UpdateSettingsView,
+} from "../src/update-settings.js";
 import { updatePreview } from "../src/updates-view.js";
 import express, { Router } from "express";
 import { spawn } from "node:child_process";
@@ -24,6 +31,13 @@ const state = z.enum(["ok", "stale", "unsupported", "unavailable"]);
 export const SnapshotSchema = z
   .object({
     version: z.literal(1),
+    collector: z
+      .object({
+        approvedRegistries: z.array(z.string().refine(validRegistry)).max(200),
+        packageStaleSeconds: z.number().int().min(1).max(1209600),
+      })
+      .strict()
+      .optional(),
     hostId: slug,
     nodeGuid: z.string().regex(/^[a-zA-Z0-9_.:-]{1,128}$/),
     collectedAt: z.number().finite().min(0).max(1e11),
@@ -146,6 +160,32 @@ export const UpdateConfigSchema = z
       new Set(c.hosts.map((h) => h.hostId)).size === c.hosts.length &&
       c.staleSeconds >= c.intervalSeconds,
     "Invalid update configuration",
+  );
+const registry = z
+  .string()
+  .refine(
+    validRegistry,
+    "Use an exact lowercase DNS hostname, optionally with a port; no URL, IP, wildcard or path",
+  );
+const hostPreferences = z
+  .object({
+    enabled: z.boolean(),
+    proposedRegistries: z
+      .array(registry)
+      .max(50)
+      .refine((v) => new Set(v).size === v.length, "Duplicate registry"),
+  })
+  .strict();
+export const UpdatePreferencesSchema = z
+  .object({
+    intervalSeconds: z.number().int().min(3600).max(604800),
+    staleSeconds: z.number().int().min(21600).max(1209600),
+    hosts: z.record(slug, hostPreferences),
+  })
+  .strict()
+  .refine(
+    (v) => v.staleSeconds >= v.intervalSeconds,
+    "Freshness threshold must be at least the snapshot-read interval",
   );
 export type UpdateConfig = z.infer<typeof UpdateConfigSchema>;
 export function loadUpdateConfig(ids: string[]): UpdateConfig {
@@ -292,6 +332,10 @@ export class Updates {
     store.db.exec(
       `CREATE TABLE IF NOT EXISTS update_snapshots(hostId TEXT PRIMARY KEY,lastAttemptAt REAL,receivedAt REAL,error TEXT,packageLastSuccessAt REAL,dockerLastSuccessAt REAL,snapshot TEXT,overview TEXT)`,
     );
+    store.db.exec(
+      `CREATE TABLE IF NOT EXISTS update_preferences(id INTEGER PRIMARY KEY CHECK(id=1),value TEXT NOT NULL)`,
+    );
+    this.preferences(); // Validate persisted configuration before polling.
     // One-time bounded presentation backfill. Normal overview reads never load inventories.
     for (const row of store.db
       .prepare("SELECT hostId,overview FROM update_snapshots")
@@ -315,8 +359,100 @@ export class Updates {
       }
     }
   }
+  preferences(): UpdatePreferences {
+    const row = this.store.db
+      .prepare("SELECT value FROM update_preferences WHERE id=1")
+      .get() as { value: string } | undefined;
+    return UpdatePreferencesSchema.parse(
+      row
+        ? JSON.parse(row.value)
+        : {
+            intervalSeconds: this.config.intervalSeconds,
+            staleSeconds: this.config.staleSeconds,
+            hosts: {},
+          },
+    );
+  }
+  pollingEnabled(id: string) {
+    return this.preferences().hosts[id]?.enabled !== false;
+  }
+  settingsView(): UpdateSettingsView {
+    const preferences = this.preferences();
+    return {
+      revision: this.store.revision(),
+      preferences,
+      hosts: this.view(true).map((h) => {
+        const reader = this.config.hosts.find((c) => c.hostId === h.hostId);
+        return {
+          hostId: h.hostId,
+          name: h.name,
+          configured: h.configured,
+          paused: h.paused,
+          reader: reader
+            ? {
+                address: reader.address,
+                port: reader.port,
+                nodeGuid: reader.nodeGuid,
+              }
+            : null,
+          collectedAt: h.snapshot?.collectedAt ?? null,
+          receivedAt: h.receivedAt,
+          error: h.error,
+          packageState: h.snapshot?.packages.state ?? "unknown",
+          dockerState: h.snapshot?.docker.state ?? "unknown",
+          policy: h.error?.includes("identity")
+            ? null
+            : (h.snapshot?.collector ?? null),
+          policyStale:
+            h.paused ||
+            !h.configured ||
+            !!h.error ||
+            !h.snapshot ||
+            this.clock() - h.snapshot.collectedAt > preferences.staleSeconds,
+          missing:
+            h.snapshot?.docker.services
+              .filter(approvalMissing)
+              .map((s) => ({
+                registry: imageRegistry(s.image),
+                project: s.project,
+                service: s.service,
+                image: s.image,
+              })) ?? [],
+        };
+      }),
+    };
+  }
+  savePreferences(revision: number, actor: string, value: UpdatePreferences) {
+    const parsed = UpdatePreferencesSchema.parse(value);
+    if (
+      Object.keys(parsed.hosts).some(
+        (id) => !this.records().some((h) => h.id === id),
+      )
+    )
+      throw Object.assign(Error("Unknown update host"), { status: 400 });
+    this.store.atomic(() => {
+      if (revision !== this.store.revision())
+        throw Object.assign(
+          Error("Configuration changed elsewhere. Reload before saving."),
+          { status: 409 },
+        );
+      this.store.db
+        .prepare(
+          "INSERT INTO update_preferences VALUES(1,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value",
+        )
+        .run(JSON.stringify(parsed));
+      this.store.bump();
+      this.store.audit(
+        actor,
+        `Updated snapshot-read settings: interval=${parsed.intervalSeconds}, stale=${parsed.staleSeconds}; host preferences/proposals: ${Object.keys(parsed.hosts).join(", ") || "none"} (host policy unchanged)`,
+      );
+    });
+    for (const [id, controller] of this.active)
+      if (!this.pollingEnabled(id)) controller.abort();
+  }
   view(details = true, id?: string): HostUpdates[] {
-    const now = this.clock();
+    const now = this.clock(),
+      preferences = this.preferences();
     return this.records()
       .filter((h) => !id || h.id === id)
       .map((h) => {
@@ -341,16 +477,17 @@ export class Updates {
               s.state === "ok" &&
               (h.archived ||
                 !h.enabled ||
+                !this.pollingEnabled(h.id) ||
                 !this.config.hosts.some((x) => x.hostId === h.id) ||
                 identityMismatch ||
                 row?.error ||
                 !s.checkedAt ||
-                now - s.checkedAt > this.config.staleSeconds ||
-                now - snapshot.collectedAt > this.config.staleSeconds ||
+                now - s.checkedAt > preferences.staleSeconds ||
+                now - snapshot.collectedAt > preferences.staleSeconds ||
                 (key === "packages" &&
                   (!snapshot.packages.metadataAt ||
                     now - snapshot.packages.metadataAt >
-                      this.config.staleSeconds)))
+                      preferences.staleSeconds)))
             ) {
               s.state = "stale";
               s.message =
@@ -370,7 +507,7 @@ export class Updates {
           archived: h.archived,
           enabled: h.enabled,
           configured: this.config.hosts.some((x) => x.hostId === h.id),
-          paused: h.archived || !h.enabled,
+          paused: h.archived || !h.enabled || !this.pollingEnabled(h.id),
           refreshing: this.active.has(h.id),
           lastAttemptAt: row?.lastAttemptAt ?? null,
           receivedAt: row?.receivedAt ?? null,
@@ -388,6 +525,7 @@ export class Updates {
       c = this.config.hosts.find((h) => h.hostId === id);
     if (
       this.stopped ||
+      !this.pollingEnabled(id) ||
       !h ||
       !c ||
       h.archived ||
@@ -419,6 +557,7 @@ export class Updates {
         controller.signal.aborted ||
         !current ||
         current.archived ||
+        !this.pollingEnabled(id) ||
         !current.enabled
       )
         return false;
@@ -499,7 +638,7 @@ export class Updates {
   }
   async tick() {
     for (const h of this.records()) {
-      if (h.archived || !h.enabled) {
+      if (h.archived || !h.enabled || !this.pollingEnabled(h.id)) {
         this.active.get(h.id)?.abort();
         continue;
       }
@@ -509,7 +648,7 @@ export class Updates {
         .get(h.id) as { lastAttemptAt: number } | undefined;
       if (
         !row ||
-        this.clock() - row.lastAttemptAt >= this.config.intervalSeconds
+        this.clock() - row.lastAttemptAt >= this.preferences().intervalSeconds
       )
         void this.refresh(h.id);
     }
@@ -540,8 +679,52 @@ export function updatesAPI(
       standardHeaders: "draft-8",
       legacyHeaders: false,
     }),
-    express.json({ limit: "1kb" }),
+    express.json({ limit: "24kb" }),
   );
+  router.get("/settings", (_req, res) => res.json(updates.settingsView()));
+  router.put("/settings", (req, res) => {
+    try {
+      const input = z
+        .object({
+          revision: z.number().int().positive(),
+          intervalSeconds: z.number(),
+          staleSeconds: z.number(),
+        })
+        .strict()
+        .parse(req.body);
+      updates.savePreferences(input.revision, res.locals.actor, {
+        ...updates.preferences(),
+        intervalSeconds: input.intervalSeconds,
+        staleSeconds: input.staleSeconds,
+      });
+      res.json(updates.settingsView());
+    } catch (e) {
+      settingsError(e, res);
+    }
+  });
+  router.put("/settings/hosts/:id", (req, res) => {
+    try {
+      if (!updates.records().some((h) => h.id === req.params.id)) {
+        res.status(404).json({ error: "Unknown update host" });
+        return;
+      }
+      const input = z
+        .object({
+          revision: z.number().int().positive(),
+          host: hostPreferences,
+        })
+        .strict()
+        .parse(req.body);
+      const current = updates.preferences();
+      updates.savePreferences(input.revision, res.locals.actor, {
+        ...current,
+        hosts: { ...current.hosts, [req.params.id]: input.host },
+      });
+      res.json(updates.settingsView());
+    } catch (e) {
+      settingsError(e, res);
+    }
+  });
   router.get("/", (_req, res) =>
     res.json({ hosts: updates.view(false), generatedAt: Date.now() / 1000 }),
   );
@@ -583,4 +766,21 @@ export function updatesAPI(
     });
   });
   return router;
+}
+
+function settingsError(error: unknown, res: express.Response) {
+  const status =
+    error instanceof z.ZodError
+      ? 400
+      : ((error as { status?: number }).status ?? 500);
+  res
+    .status(status)
+    .json({
+      error:
+        error instanceof z.ZodError
+          ? "Invalid Updates settings. Check timing bounds and exact, unique registry hostnames."
+          : status < 500 && error instanceof Error
+            ? error.message
+            : "Unable to save Updates settings",
+    });
 }

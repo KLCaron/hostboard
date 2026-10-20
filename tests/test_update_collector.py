@@ -181,4 +181,15 @@ class RegistryTests(unittest.TestCase):
             with self.assertRaises(ValueError):m.write_snapshot({'x':'a'*m.MAX_BYTES},dest)
             self.assertEqual(json.loads(dest.read_text()),{'version':1})
 
+class CollectorPolicyTests(unittest.TestCase):
+    def test_policy_report_contains_names_only_and_no_network_configuration_from_app(self):
+        config = {'hostId':'host','nodeGuid':'guid','staleSeconds':43200,'registries':{'lscr.io':{'username':'private-user','password':'private-secret','tokenRealms':['https://private.example/token']}}}
+        with patch.object(m,'collect_packages',return_value={}), patch.object(m,'collect_docker',return_value={}) as docker:
+            snapshot = m.snapshot(config)
+        self.assertEqual(snapshot['collector'], {'approvedRegistries':['lscr.io'],'packageStaleSeconds':43200})
+        self.assertNotIn('private-secret', json.dumps(snapshot))
+        self.assertNotIn('private-user', json.dumps(snapshot))
+        self.assertNotIn('private.example', json.dumps(snapshot))
+        docker.assert_called_once_with(config['registries'])
+
 if __name__=='__main__':unittest.main()
