@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { updatePreview } from "../src/updates-view.js";
 import express, { Router } from "express";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
@@ -291,6 +292,28 @@ export class Updates {
     store.db.exec(
       `CREATE TABLE IF NOT EXISTS update_snapshots(hostId TEXT PRIMARY KEY,lastAttemptAt REAL,receivedAt REAL,error TEXT,packageLastSuccessAt REAL,dockerLastSuccessAt REAL,snapshot TEXT,overview TEXT)`,
     );
+    // One-time bounded presentation backfill. Normal overview reads never load inventories.
+    for (const row of store.db
+      .prepare("SELECT hostId,overview FROM update_snapshots")
+      .all() as Row[]) {
+      const overview = row.overview ? JSON.parse(row.overview) : null;
+      if (overview && !overview.preview) {
+        try {
+          const saved = store.db
+            .prepare("SELECT snapshot FROM update_snapshots WHERE hostId=?")
+            .get(row.hostId) as Row;
+          overview.preview = updatePreview(
+            saved.snapshot ? JSON.parse(saved.snapshot) : null,
+          );
+          store.db
+            .prepare("UPDATE update_snapshots SET overview=? WHERE hostId=?")
+            .run(JSON.stringify(overview), row.hostId);
+        } catch {
+          // A damaged legacy inventory must not prevent the rest of monitoring starting.
+          console.warn("Stored update inventory preview unavailable");
+        }
+      }
+    }
   }
   view(details = true, id?: string): HostUpdates[] {
     const now = this.clock();
@@ -336,6 +359,7 @@ export class Updates {
           }
         }
         return {
+          preview: details ? updatePreview(snapshot) : overview?.preview,
           detailsIncluded: details,
           counts: details
             ? updateCounts(snapshot)
@@ -448,6 +472,7 @@ export class Updates {
               packages: { ...s.packages, packages: [] },
               docker: { ...s.docker, services: [] },
             },
+            preview: updatePreview(s),
             counts: updateCounts(s),
           }),
           id,

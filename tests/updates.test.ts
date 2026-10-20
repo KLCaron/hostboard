@@ -597,3 +597,68 @@ test("snapshot validates platform-manifest comparisons without treating index ID
   service.deployedManifest = null;
   assert(!SnapshotSchema.safeParse(s).success);
 });
+
+test("existing compact overviews gain bounded previews at restart without collection or schema change", async (t) => {
+  const f = fixture(t);
+  await f.updates.refresh("host");
+  const row = f.store.db
+    .prepare("SELECT overview FROM update_snapshots WHERE hostId='host'")
+    .get()!;
+  const old = JSON.parse(row.overview as string);
+  delete old.preview;
+  f.store.db
+    .prepare("UPDATE update_snapshots SET overview=? WHERE hostId='host'")
+    .run(JSON.stringify(old));
+  const calls = f.calls;
+  const restarted = new Updates(
+    f.store,
+    () => f.records,
+    f.config,
+    f.provider,
+    () => f.now,
+  );
+  t.after(() => restarted.stop());
+  const summary = restarted.view(false)[0];
+  assert.equal(f.calls, calls);
+  assert.deepEqual(summary.preview!.packages[0], {
+    name: "libexample",
+    security: true,
+  });
+  assert.equal(summary.preview!.services.length, 1);
+  assert.deepEqual(summary.snapshot!.packages.packages, []);
+  assert.equal(
+    f.store.db.prepare("PRAGMA user_version").get()!.user_version,
+    4,
+  );
+});
+
+test("a damaged legacy inventory cannot stop preview backfill or other monitoring", async (t) => {
+  const f = fixture(t);
+  await f.updates.refresh("host");
+  await f.updates.refresh("other");
+  for (const id of ["host", "other"]) {
+    const row = f.store.db
+      .prepare("SELECT overview FROM update_snapshots WHERE hostId=?")
+      .get(id)!;
+    const old = JSON.parse(row.overview as string);
+    delete old.preview;
+    f.store.db
+      .prepare("UPDATE update_snapshots SET overview=? WHERE hostId=?")
+      .run(JSON.stringify(old), id);
+  }
+  f.store.db
+    .prepare(
+      "UPDATE update_snapshots SET snapshot='invalid-json' WHERE hostId='host'",
+    )
+    .run();
+  const restarted = new Updates(
+    f.store,
+    () => f.records,
+    f.config,
+    f.provider,
+    () => f.now,
+  );
+  t.after(() => restarted.stop());
+  assert.equal(restarted.view(false)[0].counts!.total, 2);
+  assert.equal(restarted.view(false)[1].preview!.packages.length, 2);
+});

@@ -43,8 +43,9 @@ try {
   expect(updates.hosts[0].detailsIncluded).toBe(false);
   expect(updates.hosts[0].configured).toBe(false);
   expect((await page.request.get(origin+'/api/admin/updates/server-a')).status()).toBe(200);
-  await page.getByText('Example server',{exact:true}).click();
+  await page.getByRole('button',{name:'Details for Example server'}).click();
   await expect(page.getByRole('button',{name:'Refresh Status',exact:true})).toBeDisabled();
+  if(name==='desktop')await page.keyboard.press('Escape');
   await page.getByRole('link',{name:'Settings',exact:true}).click();
   await expect(page.getByRole('link',{name:'Sign out',exact:true})).toBeVisible();
   expect((await page.request.get(origin+'/api/admin/config')).status()).toBe(200);

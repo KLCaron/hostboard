@@ -77,6 +77,11 @@ export function updateCounts(s: UpdateSnapshot | null): UpdateCounts {
   };
 }
 export interface HostUpdates {
+  preview?: {
+    packages: Pick<PackageUpdate, "name" | "security">[];
+    services: { project: string; service: string }[];
+    unverifiedServices: number;
+  };
   detailsIncluded?: boolean;
   counts?: UpdateCounts;
   hostId: string;
