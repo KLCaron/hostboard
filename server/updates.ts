@@ -381,7 +381,9 @@ export class Updates {
     return {
       revision: this.store.revision(),
       preferences,
-      hosts: this.view(true).map((h) => {
+      hosts: this.records().map((record) => {
+        // Discard each inventory after extracting settings; never retain the full fleet.
+        const h = this.view(true, record.id)[0];
         const reader = this.config.hosts.find((c) => c.hostId === h.hostId);
         return {
           hostId: h.hostId,
@@ -410,14 +412,12 @@ export class Updates {
             !h.snapshot ||
             this.clock() - h.snapshot.collectedAt > preferences.staleSeconds,
           missing:
-            h.snapshot?.docker.services
-              .filter(approvalMissing)
-              .map((s) => ({
-                registry: imageRegistry(s.image),
-                project: s.project,
-                service: s.service,
-                image: s.image,
-              })) ?? [],
+            h.snapshot?.docker.services.filter(approvalMissing).map((s) => ({
+              registry: imageRegistry(s.image),
+              project: s.project,
+              service: s.service,
+              image: s.image,
+            })) ?? [],
         };
       }),
     };
@@ -477,7 +477,7 @@ export class Updates {
               s.state === "ok" &&
               (h.archived ||
                 !h.enabled ||
-                !this.pollingEnabled(h.id) ||
+                preferences.hosts[h.id]?.enabled === false ||
                 !this.config.hosts.some((x) => x.hostId === h.id) ||
                 identityMismatch ||
                 row?.error ||
@@ -507,7 +507,10 @@ export class Updates {
           archived: h.archived,
           enabled: h.enabled,
           configured: this.config.hosts.some((x) => x.hostId === h.id),
-          paused: h.archived || !h.enabled || !this.pollingEnabled(h.id),
+          paused:
+            h.archived ||
+            !h.enabled ||
+            preferences.hosts[h.id]?.enabled === false,
           refreshing: this.active.has(h.id),
           lastAttemptAt: row?.lastAttemptAt ?? null,
           receivedAt: row?.receivedAt ?? null,
@@ -773,14 +776,12 @@ function settingsError(error: unknown, res: express.Response) {
     error instanceof z.ZodError
       ? 400
       : ((error as { status?: number }).status ?? 500);
-  res
-    .status(status)
-    .json({
-      error:
-        error instanceof z.ZodError
-          ? "Invalid Updates settings. Check timing bounds and exact, unique registry hostnames."
-          : status < 500 && error instanceof Error
-            ? error.message
-            : "Unable to save Updates settings",
-    });
+  res.status(status).json({
+    error:
+      error instanceof z.ZodError
+        ? "Invalid Updates settings. Check timing bounds and exact, unique registry hostnames."
+        : status < 500 && error instanceof Error
+          ? error.message
+          : "Unable to save Updates settings",
+  });
 }
