@@ -482,8 +482,10 @@ export function UpdateSettings({
                       <code>sudoedit /etc/hostboard-updates.json</code>, merge
                       only the entries below into its existing{" "}
                       <code>registries</code> object. Preserve all other
-                      registries, settings and private credentials. Do not
-                      replace the whole file with this fragment.
+                      registries, settings and private credentials. Add only
+                      missing registry keys; never overwrite an existing
+                      registry policy. Do not replace the whole file with this
+                      fragment.
                     </li>
                   </ol>
                   <pre>
