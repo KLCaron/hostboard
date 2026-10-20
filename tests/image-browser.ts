@@ -49,6 +49,34 @@ try {
   await page.getByRole('link',{name:'Settings',exact:true}).click();
   await expect(page.getByRole('link',{name:'Sign out',exact:true})).toBeVisible();
   expect((await page.request.get(origin+'/api/admin/config')).status()).toBe(200);
+  await page.getByRole('tab',{name:'Updates',exact:true}).click();
+  await expect(page.getByLabel('Snapshot-read interval (seconds)')).toHaveValue('21600');
+  await page.getByLabel('Snapshot-read interval (seconds)').fill('7200');
+  await page.getByRole('button',{name:'Save snapshot timing',exact:true}).click();
+  await expect(page.getByRole('status')).toContainText('timer is unchanged');
+  await page.getByLabel('Additional registry hostname').fill('registry.example.com');
+  await page.getByRole('button',{name:'Add proposal',exact:true}).click();
+  await page.getByRole('button',{name:'Save host preferences',exact:true}).click();
+  await expect(page.getByRole('status')).toContainText('operator application');
+  const settings = await (await page.request.get(origin+'/api/admin/updates/settings')).json();
+  expect(settings.preferences.intervalSeconds).toBe(7200);
+  expect(settings.preferences.hosts['server-a'].proposedRegistries).toEqual(['registry.example.com']);
+  expect(settings.hosts[0].policy).toBeNull();
+  await page.reload();
+  await page.getByRole('tab',{name:'Updates',exact:true}).click();
+  await expect(page.getByLabel('Snapshot-read interval (seconds)')).toHaveValue('7200');
+  // Reset the controlled fixture for the next viewport, using the same revision protocol.
+  expect(await page.evaluate(async () => {
+    const settings = await (await fetch('/api/admin/updates/settings')).json();
+    return (await fetch('/api/admin/updates/settings', {method:'PUT',headers:{'Content-Type':'application/json','X-Hostboard-Request':'1'},body:JSON.stringify({revision:settings.revision,intervalSeconds:21600,staleSeconds:86400})})).status;
+  })).toBe(200);
+  // Reload after the API change so the GUI must use its current configuration revision.
+  await page.reload();
+  await page.getByRole('tab',{name:'Updates',exact:true}).click();
+  await page.getByRole('button',{name:'Remove proposal registry.example.com',exact:true}).click();
+  await page.getByRole('button',{name:'Save host preferences',exact:true}).click();
+  await expect(page.getByRole('status')).toContainText('operator application');
+
   expect(await page.evaluate(async()=>{
     const config=await (await fetch('/api/admin/config')).json();
     config.settings.general.temperature='F';
@@ -59,6 +87,7 @@ try {
   await expect(page.getByRole('heading',{name:'Administrator sign in'})).toBeVisible();
   expect((await page.request.get(origin+'/api/admin/config')).status()).toBe(401);
   expect((await page.request.get(origin+'/api/admin/updates')).status()).toBe(401);
+  expect((await page.request.get(origin+'/api/admin/updates/settings')).status()).toBe(401);
   expect(errors).toEqual([]);await context.close();
  }
  console.log('PASS: container image Firefox desktop/mobile sign-in, real dashboard/Agent, Settings administrator access/writes, read-only Updates summary/detail routes, sign-out, and unauthenticated denial.');
