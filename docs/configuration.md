@@ -5,17 +5,20 @@ Files containing real configuration are Git-ignored. None is included in the ima
 | File | Purpose / lifecycle |
 | --- | --- |
 | `.env` | Published image, host interface/port, browser URL, data/private directories, container UID/GID; read by Compose |
-| `config/hosts.json` | 1–20 Agent/node entries; read on startup; changes require recreation |
+| `config/hosts.json` | 0–100 bootstrap Agent/node entries; imported into the server registry once; also supplies compatibility destination approval when no explicit Agent policy exists |
 | `config/checks.json` | Optional bootstrap checks; imported only when SQLite settings are first initialized |
+| `private/agents.json` | Optional exact Agent origins, approved IPs, and credential environment references; restart Hostboard after policy changes |
 | `private/admin.json` | Authentication and exact allowed service targets; required; startup validation |
 | `private/smtp.json` | Optional SMTP transport credentials; startup validation |
-| `data/monitor.sqlite` (+ WAL/SHM) | Persistent preferences, editable services, incidents, samples, notification queue, audit history |
+| `private/logs.json` and `private/logs/` | Optional per-host log readers, dedicated SSH key, and pinned host keys; [log setup](logs.md) |
+| `private/updates.json` and `private/updates/` | Optional identity-pinned snapshot readers, timing defaults, dedicated SSH key, and pinned host keys; [update setup](updates.md) |
+| `data/monitor.sqlite` (+ WAL/SHM) | Server registry/groups, preferences, editable checks, incidents, samples, issue-handling rules, log mappings, update snapshots/preferences, notification queue, and audit history |
 
 See [.env.example](../.env.example) for deployment defaults. Docker mounts config/private read-only and data read/write. The default image runs as uid/gid 1000, overridden by the unprivileged UID/GID selected during setup. The filesystem is otherwise read-only, all capabilities are dropped, and no Docker socket is mounted.
 
 ## Agent entries
 
-`id`: unique `[a-zA-Z0-9_-]`, 1–64 characters. `name`: display label, 1–80 characters. `url`: HTTP(S) origin, no path, embedded credentials, query, or fragment. `node`: exact hostname/GUID/UUID from `/api/v3/nodes`, no wildcards. Optional `tokenEnv`: an explicitly passed environment variable name containing a bearer token. Optional `addresses`: literal approved IP list; omitted names are pinned on first successful DNS resolution for this process. Wrong/ambiguous node selectors produce a visible connection error rather than mixing hosts.
+`id`: unique `[a-zA-Z0-9_-]`, 1–64 characters. `name`: display label, 1–80 characters. `url`: HTTP(S) origin, no path, embedded credentials, query, or fragment. `node`: exact hostname/GUID/UUID from `/api/v3/nodes`, no wildcards. Optional `tokenEnv`: an explicitly passed environment variable name containing a bearer token. Optional `addresses`: literal approved IP list. Under compatibility approval, DNS names without `addresses` are resolved and pinned once at startup; failed DNS remains denied until restart. An explicit `private/agents.json` replaces those compatibility grants. Wrong/ambiguous node selectors produce a visible connection error rather than mixing hosts.
 
 ## Local admin policy
 

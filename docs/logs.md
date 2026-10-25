@@ -1,6 +1,6 @@
 # Container logs and incident investigation
 
-Hostboard v0.6 optionally reads existing **Docker-managed stdout/stderr** on approved hosts. It does not collect or retain log bodies, change Docker logging settings, require Netdata Cloud, or add a log database. A normal Compose installation needs no log configuration and retains its monitoring features.
+Hostboard optionally reads existing **Docker-managed stdout/stderr** on approved hosts. It does not collect or retain log bodies, change Docker logging settings, require Netdata Cloud, or add a log database. A normal Compose installation needs no log configuration and retains its monitoring features.
 
 ## Workflow
 
@@ -24,6 +24,8 @@ The helper permits only a bounded JSON `sources` or `query` request. Its only Do
 Python standard-library parsing, fixed paths/methods, strict schemas, pinned SSH identity, process CPU/address-space/fd/core limits, per-host file-lock admission and deadlines reduce attack surface; they are not a formal security audit. Review changes before upgrading the adapter. Removing a source from the host allowlist revokes it even if a browser mapping still exists.
 
 ## Optional setup on one or more hosts
+
+Netdata discovering a new container does not grant log access. Add an exact source selector to that host's root-managed allowlist and associate it with the container or service in **Settings → Log Sources**. Compose project/service/replica selectors survive normal container replacement; a full container-ID selector must be reviewed when the container is replaced. Keep existing approvals when extending the allowlist.
 
 Requires a Linux Docker host with Python 3, OpenSSH server, systemd, and its `docker` socket group. The installation helper targets Debian/Ubuntu’s `ssh.service`; adapt the service name on other distributions after review. Run this only on hosts whose administrator accepts the socket privilege above. It never restarts Docker or application containers.
 

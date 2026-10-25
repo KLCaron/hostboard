@@ -1,6 +1,6 @@
 # Security
 
-Hostboard v0.6 receives fixes on `main`; use a current supported release. This project has undergone a practical release security review, not a formal audit or a guarantee of complete security.
+Security fixes are developed on `main` and reach published images through tagged releases. Check the [release notes](https://github.com/KLCaron/hostboard/releases) and use the documentation for your deployed version. When a fix is on `main` but has not been released, the [source-build instructions](docs/installation.md#build-from-source) explain how to run that code; a source version does not guarantee a published image with that tag. This project has undergone practical release security checks, not a formal audit or a guarantee of complete security.
 
 For a sensitive vulnerability, use the repository's private GitHub vulnerability reporting if available, or contact the maintainer privately through their GitHub profile before disclosing exploit details. Do not post credentials, tokens, private endpoints, or backups in an issue. Public non-sensitive hardening reports can use GitHub Issues.
 
@@ -37,3 +37,7 @@ CI performs TypeScript/backend/watchdog/build tests, Firefox desktop/mobile regr
 ## Update Monitor
 
 The Update Monitor is permanently observation-only. Its administrator-only APIs read scheduled snapshots; no install, upgrade, pull, deployment, restart, arbitrary command or remote collection trigger is provided. The separate SSH reader has no Docker/sudo rights and can read only a root-owned bounded snapshot. The optional trusted local producer needs Docker daemon access; review this residual root-equivalent privilege before installing it. Registry credentials remain host-local and registry/token/CDN destinations require explicit approval. See [the complete boundary and setup](docs/updates.md).
+
+## Issue handling
+
+Acknowledge, snooze, ignore, and restore actions require administrator authorization, exact Origin/JSON request checks, and a current configuration revision. Rules are tied to the registered host identity and condition; changed evaluations and warning-to-critical escalation resurface issues. Handling can suppress matching Hostboard service-check emails, including queued messages, but does not disable collection, resolve an incident, or change independent Netdata/Cloud/watchdog delivery. Reasons and operator identities are retained in SQLite and backups. See [handling individual issues](docs/operations.md#handling-individual-issues).

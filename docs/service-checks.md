@@ -21,6 +21,14 @@ Limits: up to 100 checks including archived checks; interval 10–3600 seconds; 
 
 Advanced seed-only `headersEnv` points to an explicitly passed environment variable containing JSON headers; credentials are never exposed by the configuration API, and such a check cannot be moved to a different origin through the UI. `watchdogHistory` imports compatible independent watchdog incidents without duplicating notification ownership. These integrations remain deployment-managed. Never approve untrusted credential-bearing endpoints.
 
+## Container resources
+
+On current `main`, **Services → Container resources** is a searchable card grid. Each card shows the container's host, state, configured Docker health result, CPU usage, memory, and any associated independent check. Click the card or focus it and press Enter/Space to expand its image, availability details, resource investigation, and log links. CPU 100% represents one core; memory is resident MiB. Offline/stale hosts show unavailable live readings.
+
+These are separate signals: **running** is Docker state; **healthy** is the container's configured Docker health check; **Reachable** is an independent Hostboard HTTP/TCP check. A container without a health check or application check is not assumed healthy. New containers appear when Netdata reports them; they do not automatically create service checks or log approvals. Use the target policy and Settings workflow above for application checks, and the [log-source setup](logs.md) for logs. Filtering supports container and host names, with an explicit empty result when nothing matches.
+
+Issue acknowledgement, snoozing, and ignore rules do not turn a failing service green or resolve its incident. See [handling individual issues](operations.md#handling-individual-issues) for their effects on the active list, counts, and Hostboard emails.
+
 ## Evaluation identity and discontinued monitoring
 
 A material evaluation change (target, host association, protocol, response criteria, schedule or threshold) starts a durable generation and retires its open incident without reporting recovery. A replacement begins with unknown availability and no last success. Name, group, notification and severity edits preserve its generation. Existing v0.5.1 observations migrate to generation 1; destinations changed before this release cannot be distinguished retroactively.

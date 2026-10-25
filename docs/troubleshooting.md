@@ -12,5 +12,9 @@
 - **Email unavailable:** missing SMTP is optional. Check transport configuration/TLS and outbound port; use Settings' test once, then confirm inbox receipt. SMTP acceptance does not prove receipt. Transport secrets and detailed provider errors are not returned to browsers.
 - **429 response:** sign-in/API/manual-test limits are active. Wait for the returned interval; proxies may share a source bucket. Do not repeatedly retry credentials.
 - **Newer database schema:** restore the matching pre-upgrade image/database pair. Do not edit `PRAGMA user_version` to bypass protection.
+- **Image tag not found after cloning main:** the source version may be newer than the latest published release. Use a published release checkout with its image, or follow the [source-build instructions](installation.md#build-from-source), including the setup-image override and persisted `.env` image reference.
+- **Adding a host to hosts.json has no effect:** it is a one-time registry bootstrap. Approve the destination in deployment policy, restart Hostboard after policy changes, and add/test the server in Settings. See [server management](servers.md).
+- **New container has no application check or logs:** Netdata discovery only supplies metrics/state. Add an approved HTTP/TCP check separately and extend the host's root-managed log allowlist plus Settings associations. A running container does not prove application availability.
+- **Updates not configured or unavailable:** install the optional collector and restricted reader using [the update guide](updates.md). Check matching host ID/GUID, scheduled snapshot freshness, SSH identity and registry approval. Refresh Status only rereads a snapshot; it does not run collection or install anything.
 
 When reporting a problem, include the release version and sanitized error text. Database backups, raw private files, live URLs, tokens, SMTP credentials, and real email allowlists do not belong in public issues.
