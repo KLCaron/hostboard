@@ -152,14 +152,27 @@ export function Containers({host,onInvestigate}:{host:Host;onInvestigate:(target
 export function Services({hosts,checks=[],onInvestigate}:{hosts:Host[];checks?:CheckView[];onInvestigate:(target:InvestigationTarget)=>void}) {
   const services=servicesFromHosts(hosts);
   const [filter,setFilter]=useState('');
+  const visible=services.filter(({host,container:c})=>`${host.name} ${c.name}`.toLowerCase().includes(filter.toLowerCase()));
   return <details className="services-panel"><summary>Container resources <span>{services.length} containers · expand to inspect</span></summary>
     <p className="detail-description">Container state, configured Docker health checks, and independent application availability are separate signals.</p>
     <input aria-label="Filter services" placeholder="Find an application or host…" value={filter} onChange={e=>setFilter(e.target.value)}/>
-    <div className="service-list">{services.filter(({host,container:c})=>`${host.name} ${c.name}`.toLowerCase().includes(filter.toLowerCase())).map(({host,container:c,availability})=><details key={host.id+c.name}><summary><b>{c.name}</b><span>{host.name}</span><span>{containerStatus(c,host.status==='online')}</span>{checks.filter(x=>x.hostId===host.id&&x.container===c.name).map(x=><span key={x.id} className={`check-state ${x.state}`}>{checkLabel(x)}</span>)}<span>{host.status==='online'?fmt(c.cpu):'—'}% · {host.status==='online'?fmt(c.memory):'—'} MiB</span></summary>
+    <div className="service-list">{visible.map(({id,host,container:c,availability})=>{
+      const online=host.status==='online';
+      const state=containerStatus(c,online);
+      const health=!online?'Health unknown':!c.health||c.health==='no_healthcheck'?'No health check':c.health.replaceAll('_',' ');
+      const relatedChecks=checks.filter(x=>x.hostId===host.id&&x.container===c.name);
+      return <details key={id} className="container-card" data-state={state}><summary>
+        <span className="container-card-heading"><b>{c.name}</b><span className="container-card-host">{host.name}</span></span>
+        <span className="container-card-status"><span className={`container-state ${state}`}>{state}</span><span className={`container-health ${online?c.health:''}`}>{health}</span></span>
+        <span className="container-card-metrics"><span><span>CPU</span><strong>{online?fmt(c.cpu):'—'}<small>%</small></strong></span><span><span>Memory</span><strong>{online?fmt(c.memory):'—'}<small>MiB</small></strong></span></span>
+        <span className="container-card-footer"><span className="container-card-availability">{relatedChecks.length?relatedChecks.map(x=><span key={x.id} className={`check-state ${x.state}`}>App: {checkLabel(x)}</span>):<span>App not checked</span>}</span><span className="container-card-toggle"><span className="when-closed">Details</span><span className="when-open">Close details</span></span></span>
+      </summary><div className="container-card-detail">
+      <p className="container-card-image">{c.image}</p>
       <p>Docker health check: {host.status!=='online'?'unknown':c.health==='no_healthcheck'?'not configured':c.health||'unknown'}. Application availability: {availability.state==='unchecked'?(checks.some(x=>x.hostId===host.id&&x.container===c.name)?'see independent check below':'not independently checked'):`${availability.state} (${availability.method}, ${availability.checkedAt})`}.</p>
-      {checks.filter(x=>x.hostId===host.id&&x.container===c.name).map(x=><p key={x.id}>Application availability: {checkLabel(x)} · {x.reason} · <a className="text-link" href={`#service=${x.id}`}>Check history →</a></p>)}
+      {relatedChecks.map(x=><p key={x.id}>Application availability: {checkLabel(x)} · {x.reason} · <a className="text-link" href={`#service=${x.id}`}>Check history →</a></p>)}
       <div className="context-actions"><button className="text-link" onClick={()=>onInvestigate({host,container:c})}>Investigate resources →</button><a className="action-link" href={logLink({hostId:host.id,container:c.name})}>View logs →</a><a className="text-link" href={`#host=${host.id}`}>Open host</a></div>
-    </details>)}</div>{!services.length&&<p className="muted">No Docker services are currently reported.</p>}
+      </div></details>;
+    })}</div>{!services.length?<p className="muted">No Docker services are currently reported.</p>:!visible.length&&<p className="muted" role="status">No containers match your search.</p>}
   </details>;
 }
 export function Alerts({hosts,onInvestigate}:{hosts:Host[];onInvestigate:(target:InvestigationTarget)=>void}) {
