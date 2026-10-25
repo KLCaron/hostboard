@@ -1,4 +1,7 @@
 import express from "express";
+import {
+  Updates, loadUpdateConfig, SSHUpdateProvider, updatesAPI,
+} from "./updates.js";
 import { Servers } from "./servers.js";
 import { loadAgentTrust } from "./agent-policy.js";
 import { readFileSync } from "node:fs";
@@ -18,6 +21,8 @@ import { loadAdmin } from "./admin.js";
 import { rateLimit } from "express-rate-limit";
 import { localAuthentication } from "./local-auth.js";
 import { configAPI, synchronize } from "./config-api.js";
+import { IssueHandlingStore, issueHandlingAPI } from './issue-handling.js';
+import type { IncidentView } from '../src/monitor-types.js';
 process.umask(0o077);
 const admin = loadAdmin();
 if (!admin)
@@ -36,6 +41,15 @@ const monitor = new Monitor(
   smtpDelivery(() => configuration.settings().notifications),
 );
 const registry = new Servers(configuration, await loadAgentTrust(bootstrap), bootstrap);
+const handling = new IssueHandlingStore(configuration, id => registry.records().find(h => h.id === id)?.guid || null);
+monitor.issueMuted = id => {
+  const incident = configuration.db.prepare('SELECT * FROM incidents WHERE id=?').get(id) as unknown as IncidentView | undefined;
+  return !!incident && !!handling.matching(handling.incident(incident));
+};
+const updateConfig = loadUpdateConfig(registry.ids());
+const updates = new Updates(
+  configuration, () => registry.records(), updateConfig, new SSHUpdateProvider(updateConfig),
+);
 const logConfig = loadLogConfig(registry.ids());
 registry.setLoggingHosts(logConfig.hosts.map(h => h.hostId));
 synchronize(configuration, monitor);
@@ -87,8 +101,10 @@ app.use(
     bootstrapTargets(seed.checks),
   ),
 );
+app.use("/api/admin/updates", updatesAPI(updates, admin));
 app.use("/api/admin/servers", registry.api(admin));
 app.use("/api/admin/logs", logsAPI(configuration, monitor, admin, () => registry.ids(), new SSHLogProvider(logConfig)));
+app.use('/api', issueHandlingAPI(handling, registry, monitor, admin));
 app.get("/api/system", async (_req, res) => {
   const hosts = await registry.fleet();
   const view = monitor.view(undefined, undefined, false);
@@ -135,10 +151,10 @@ app.get("/api/monitor", async (req, res) => {
     return;
   }
   res.json(
-    await monitor.viewAsync(
+    handling.monitor(await monitor.viewAsync(
       undefined,
       before === undefined ? undefined : Number(before),
-    ),
+    )),
   );
 });
 // Authenticated in local mode, behind Access in Cloudflare mode, like other history reads.
@@ -168,11 +184,11 @@ app.get("/api/incidents/:id", async (req, res) => {
     res.status(404).json({ error: "Unknown incident" });
     return;
   }
-  res.json(incident);
+  res.json({...incident, handling: handling.matching(handling.incident(incident))});
 });
 app.get("/api/fleet", async (_req, res) =>
   res.json({
-    hosts: await registry.fleet(),
+    hosts: await Promise.all((await registry.fleet()).map(h => handling.host(h, () => registry.agent(h.id)!.alertDetails()))),
     groups: registry.groups(),
     generatedAt: new Date().toISOString(),
     refreshSeconds: 10,
@@ -235,7 +251,7 @@ for (const endpoint of [
     try {
       if (endpoint === "metrics") res.json(await agent.catalog());
       else if (endpoint === "diagnostics") res.json(await agent.diagnostics());
-      else if (endpoint === "alerts") res.json(await agent.alertDetails());
+      else if (endpoint === "alerts") res.json(handling.alerts(req.params.id, await agent.alertDetails()));
       else {
         if (!(await agent.catalog()).some((c) => c.id === req.query.chart)) {
           res
@@ -274,6 +290,7 @@ app.get(
     "/overview",
     "/servers",
     "/services",
+    "/updates",
     "/issues",
     "/settings",
     "/alerts",
@@ -307,10 +324,14 @@ const servers = addresses.map((address) =>
       `Hostboard listening on ${address}:${port}; ${registry.ids().length} hosts configured`,
     );
     // Self-checks must not race the HTTP listeners during startup.
-    if (++listening === addresses.length) monitor.start();
+    if (++listening === addresses.length) {
+      monitor.start();
+      updates.start();
+    }
   }),
 );
 process.on("SIGTERM", () => {
+  updates.stop();
   monitor.stop();
   stopSessions();
   let remaining = servers.length;

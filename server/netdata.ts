@@ -307,6 +307,16 @@ export class Agent {
     host.version = meta.node.v;
     host.os = meta.node.os ? `${meta.node.os.nm} ${meta.node.os.v}` : null;
     host.cores = Number(meta.node.hw?.cpus) || null;
+    // The parent API remains reachable after a streaming child disconnects.
+    // Netdata's nodes endpoint calls that child "stale"; it is offline from
+    // Hostboard's perspective, even while recent samples remain in the parent.
+    if (['stale', 'unreachable', 'offline', 'pruned', 'created'].includes(node.state)) {
+      host.status = 'offline';
+      host.error = 'Host is offline: Netdata reports no active Agent or streaming connection.';
+      host.lastSeen = this.snapshot?.host.lastSeen || null;
+      this.metadataRefreshAt = Math.min(this.metadataRefreshAt, Date.now() + 30_000);
+      return host;
+    }
     const tables = new Map<string, Map<string, Sample[]>>();
     await Promise.all(
       CONTEXTS.map(async (context) => {
@@ -328,7 +338,9 @@ export class Agent {
       ? new Date(cpuSample.time * 1000).toISOString()
       : this.snapshot?.host.lastSeen || null;
     if (host.status === 'stale')
-      host.error = 'No fresh CPU samples from this host. Check the Agent or streaming connection.';
+      host.error = node.state === 'reachable'
+        ? 'Agent is reachable but fresh CPU samples are unavailable. Check metric collection.'
+        : 'Netdata node reachability is unknown. Check the Agent or streaming connection.';
     host.cpu = cpuSample ? cpu(cpuSample.values) : null;
     host.uptime = values('system.uptime').uptime ?? null;
     const load = values('system.load');

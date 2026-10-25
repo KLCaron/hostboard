@@ -32,6 +32,7 @@ export interface Alert {
   count: number;
 }
 export interface Host {
+  handledAlerts?: number;
   discovery?: import('./server-types.js').ServerDiscovery;
   enabled?: boolean;
   archived?: boolean;

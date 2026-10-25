@@ -1,0 +1,25 @@
+[Unit]
+Description=Hostboard read-only update snapshot collection
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 -I /usr/local/libexec/hostboard-update-collector.py
+User=root
+Group=hostboard-updates
+UMask=0027
+TimeoutStartSec=310
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/lib/hostboard-updates
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+LockPersonality=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+LimitCORE=0
+LimitNOFILE=128
+MemoryMax=512M
+TasksMax=16

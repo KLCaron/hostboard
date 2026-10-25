@@ -1,3 +1,5 @@
+import { UpdatesPage, UpdateSummary, updateHealth, useUpdates } from "./Updates";
+import type { HostUpdates } from "./update-types";
 import { DiscoverySummary } from "./ServerSettings";
 import { TabList } from "./TabList";
 import { LogsPage } from './Logs';
@@ -204,6 +206,7 @@ function Meter({
 }
 function HostCard({
   host,
+  updates,
   history,
   range,
   expanded,
@@ -211,6 +214,7 @@ function HostCard({
   onInvestigate,
 }: {
   host: Host;
+  updates?: HostUpdates;
   history?: History;
   range: Range;
   expanded: boolean;
@@ -272,13 +276,23 @@ function HostCard({
           {live ? uptime(host.uptime) : "Live metrics unavailable"}
         </span>
         {alerts != null && alerts > 0 ? (
-          <span className="warning-text">
-            <Bell size={13} />
+          <a
+            className="text-link warning-text"
+            href={`#issues?type=metric&host=${encodeURIComponent(host.id)}`}
+            aria-label={`View ${alerts} ${alerts === 1 ? "alert" : "alerts"} for ${host.name}`}
+          >
+            <Bell size={13} aria-hidden="true" />
             {alerts} {alerts === 1 ? "alert" : "alerts"}
-          </span>
+          </a>
+        ) : host.handledAlerts ? (
+          <a className="text-link" href={`#issues?tab=handled&type=metric&host=${encodeURIComponent(host.id)}`}>{host.handledAlerts} handled {host.handledAlerts === 1 ? 'alert' : 'alerts'}</a>
         ) : (
           <span className="muted">{host.hostname}</span>
         )}
+      </div>
+      <div className="host-update-summary">
+        <a className="text-link" href={`#updates?host=${encodeURIComponent(host.id)}`}>Updates</a>
+        {updates ? <><UpdateSummary host={updates} /><span className="muted small">{updateHealth(updates)}</span></> : <span className="muted small">Status unavailable</span>}
       </div>
       <div className="metric-pair">
         <div className="metric-block">
@@ -525,6 +539,7 @@ function HostCard({
   );
 }
 function App() {
+  const updates = useUpdates();
   const display = useDisplay();
   const [fleet, setFleet] = useState<Fleet>(),
     [histories, setHistories] = useState<Record<string, History>>({}),
@@ -557,6 +572,11 @@ function App() {
     }
   }, [display.landing]);
   const [target, setTarget] = useState<InvestigationTarget | null>(null);
+  useEffect(() => {
+    const changed = () => setRefresh(v => v + 1);
+    window.addEventListener('hostboard:issues', changed);
+    return () => window.removeEventListener('hostboard:issues', changed);
+  }, []);
   useEffect(() => {
     const link = () => {
       const route = resolveNavigation(location.hash, location.pathname);
@@ -820,6 +840,7 @@ function App() {
       node: (
         <HostCard
           host={host}
+          updates={updates.error ? undefined : updates.hosts.find(h => h.hostId === host.id)}
           history={histories[host.id]}
           range={range}
           expanded={expanded === host.id}
@@ -851,6 +872,7 @@ function App() {
               servers: Server,
               services: Activity,
               logs: ScrollText,
+              updates: RefreshCw,
               issues: Bell,
               settings: SettingsIcon,
             }[value];
@@ -994,6 +1016,7 @@ function App() {
                       <HostCard
                         key={host.id}
                         host={host}
+                        updates={updates.error ? undefined : updates.hosts.find(h => h.hostId === host.id)}
                         history={histories[host.id]}
                         range={range}
                         expanded={expanded === host.id}
@@ -1043,6 +1066,9 @@ function App() {
               error={monitoring.error}
               onInvestigate={setTarget}
             />
+          )}
+          {page === "updates" && (
+            <UpdatesPage hosts={updates.hosts} error={updates.error} groups={fleet?.groups || []} />
           )}
           {page === "settings" && (
             <Settings

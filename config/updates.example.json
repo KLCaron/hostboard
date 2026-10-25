@@ -1,0 +1,7 @@
+{
+  "intervalSeconds": 21600,
+  "staleSeconds": 86400,
+  "hosts": [
+    { "hostId": "server-a", "nodeGuid": "REPLACE-WITH-REGISTERED-NETDATA-GUID", "address": "192.168.1.10", "port": 22 }
+  ]
+}

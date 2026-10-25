@@ -18,7 +18,7 @@ release="$(date -u +%Y%m%dT%H%M%SZ)-$(git rev-parse --short HEAD)"
 root=/srv/stacks/hostboard
 ssh "${ssh_args[@]}" "$target" "set -eu; if [ ! -d '$root' ]; then sudo -n install -d -o \"\$(id -un)\" -g \"\$(id -gn)\" '$root'; fi; mkdir -p '$root/releases/$release' '$root/config'; if [ -f '$root/.env' ]; then cp '$root/.env' '$root/.env.before-$release'; fi; if [ -f '$root/config/hosts.json' ]; then cp '$root/config/hosts.json' '$root/config/hosts.json.before-$release'; fi"
 # Only project source is transferred; local research, credentials and Git stay local.
-tar -czf - .dockerignore Dockerfile compose.yaml package.json package-lock.json tsconfig.json tsconfig.server.json vite.config.ts index.html public src server tests scripts deploy playwright.config.ts README.md LICENSE THIRD_PARTY_NOTICES.txt config/hosts.example.json config/checks.example.json config/smtp.example.json config/admin.example.json | ssh "${ssh_args[@]}" "$target" "tar -xzf - -C '$root/releases/$release'"
+tar -czf - .dockerignore Dockerfile compose.yaml package.json package-lock.json tsconfig.json tsconfig.server.json vite.config.ts index.html public src server tests scripts deploy playwright.config.ts README.md SECURITY.md docs LICENSE THIRD_PARTY_NOTICES.txt config/hosts.example.json config/checks.example.json config/smtp.example.json config/admin.example.json config/updates.example.json config/update-collector.example.json | ssh "${ssh_args[@]}" "$target" "tar -xzf - -C '$root/releases/$release'"
 ssh "${ssh_args[@]}" "$target" "test -f '$root/.env'" || scp "${ssh_args[@]}" .env "$target:$root/.env"
 ssh "${ssh_args[@]}" "$target" "test -f '$root/config/hosts.json'" || scp "${ssh_args[@]}" config/hosts.json "$target:$root/config/hosts.json"
 ssh "${ssh_args[@]}" "$target" "if [ -f '$root/config/checks.json' ]; then cp '$root/config/checks.json' '$root/config/checks.json.before-$release'; fi"
@@ -36,12 +36,22 @@ install -d -m 700 "$root/data" "$root/private"
 # This optional helper owns the shared-root topology. Reject alternate mounts
 # rather than producing a misleading checkpoint; use manage.sh for configurable storage.
 if docker inspect hostboard-hostboard-1 >/dev/null 2>&1; then
-  docker inspect hostboard-hostboard-1 | python3 -c 'import json,sys; mounts={m["Destination"]:m["Source"] for m in json.load(sys.stdin)[0]["Mounts"]}; root="/srv/stacks/hostboard"; assert all(mounts.get("/app/"+n)==root+"/"+n for n in ("private","data")), "SSH helper requires default shared mounts; use paired recovery for alternate storage"'
+  docker inspect hostboard-hostboard-1 | python3 -c 'import json,sys,pathlib; mounts={m["Destination"]:m["Source"] for m in json.load(sys.stdin)[0]["Mounts"]}; root="/srv/stacks/hostboard"; assert all(str(pathlib.Path(mounts.get("/app/"+n,"/nonexistent")).resolve())==root+"/"+n for n in ("private","data")), "SSH helper requires default shared mounts; use paired recovery for alternate storage"'
 fi
 checkpoint="$root/backups/pre-$release"
 mkdir -m 700 -p "$checkpoint"
 cp -a "$root/.env" "$root/private" "$root/config" "$checkpoint/"
 if [ -L "$root/current" ]; then readlink "$root/current" > "$checkpoint/release.txt"; fi
+if docker inspect hostboard-hostboard-1 >/dev/null 2>&1; then
+  docker inspect --format '{{.Image}}' hostboard-hostboard-1 > "$checkpoint/image-id.txt"
+  docker inspect --format '{{.Config.Image}}' hostboard-hostboard-1 > "$checkpoint/image-reference.txt"
+  python3 - "$checkpoint" <<'PYIMAGE'
+import pathlib,json,sys
+p=pathlib.Path(sys.argv[1]);image=p.joinpath('image-id.txt').read_text().strip()
+assert image.startswith('sha256:') and len(image)==71
+p.joinpath('rollback-image.yaml').write_text('services:\n  hostboard:\n    image: '+image+'\n')
+PYIMAGE
+fi
 # Shared bind mounts preserve SQLite and credentials across releases and rollbacks.
 ln -s "$root/data" "$root/releases/$release/data"
 ln -s "$root/private" "$root/releases/$release/private"
@@ -57,8 +67,8 @@ ln -s "$root/config/hosts.json" "$root/releases/$release/config/hosts.json"
 if [ -L "$root/current" ]; then readlink "$root/current" > "$root/previous-release"; fi
 cd "$root/releases/$release"
 export HOSTBOARD_TAG="$release"
-docker compose -f deploy/compose.host.yaml --project-directory . --env-file "$root/.env" build
-docker compose -f deploy/compose.host.yaml --project-directory . --env-file "$root/.env" up -d --no-build
+docker compose -f deploy/compose.host.yaml --project-directory . --env-file "$root/.env" build --build-arg REVISION="${release##*-}"
+if docker compose -f deploy/compose.host.yaml --project-directory . --env-file "$root/.env" up -d --no-build --no-deps hostboard; then
 # Verify the actual HTTP listener before advancing current.
 set -a
 source "$root/.env"
@@ -71,6 +81,7 @@ for attempt in $(seq 1 30); do
   fi
   sleep 2
 done
+fi
 if [ -f "$root/previous-release" ]; then
   previous=$(cat "$root/previous-release")
   if [ -d "$previous" ]; then
@@ -96,7 +107,12 @@ PYRESTORE
     fi
     cd "$previous"
     if [ -f deploy/compose.host.yaml ]; then
-      HOSTBOARD_TAG=$(basename "$previous") docker compose -f deploy/compose.host.yaml --project-directory . --env-file "$root/.env" up -d --no-build
+      if [ -f "$checkpoint/rollback-image.yaml" ]; then
+        HOSTBOARD_TAG=$(basename "$previous") docker compose -f deploy/compose.host.yaml -f "$checkpoint/rollback-image.yaml" --project-directory . --env-file "$root/.env" up -d --no-build --no-deps hostboard
+      else
+        echo 'Exact previous image checkpoint missing; refuse an unverified image rollback.' >&2
+        exit 1
+      fi
     else
       HOSTBOARD_TAG=$(basename "$previous") docker compose --env-file "$root/.env" up -d --no-build
     fi

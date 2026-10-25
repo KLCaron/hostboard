@@ -45,7 +45,7 @@ test('same Agent recovers from parent outage, child reconnect and provisional Do
   const trust = new AgentTrust([{url, addresses: ['127.0.0.1']}]);
   const agent = new Agent({id: 'child', name: 'Child', url, node: 'child-guid'}, trust);
   const poll = async (advance = 9000) => { now += advance; return agent.current(); };
-  assert.equal((await poll()).status, 'stale');
+  assert.equal((await poll()).status, 'offline');
   reachable = true; docker = true;
   let host = await poll();
   assert.equal(host.status, 'online');
@@ -73,7 +73,7 @@ test('same Agent recovers from parent outage, child reconnect and provisional Do
   docker = true;
   host = await poll(31_000); assert.equal(host.dockerAvailable, true);
   reachable = false;
-  host = await poll(); assert.equal(host.status, 'stale');
+  host = await poll(); assert.equal(host.status, 'offline');
   reachable = true;
   host = await poll(); assert.equal(host.status, 'online');
   identity = 'replacement-guid';

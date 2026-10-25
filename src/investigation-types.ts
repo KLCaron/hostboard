@@ -10,6 +10,7 @@ export interface Diagnostic extends Metric {
   values: Record<string, number | null>;
 }
 export interface AlertDetail {
+  handling?: import('./issue-handling-types.js').IssueHandling;
   id: string;
   name: string;
   summary: string;

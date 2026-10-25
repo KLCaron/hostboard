@@ -1,6 +1,7 @@
+import { UpdateSettings } from "./UpdateSettings";
 import { ServerSettings } from "./ServerSettings";
 import { TabList } from "./TabList";
-import { LogSettings } from './LogSettings';
+import { LogSettings } from "./LogSettings";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Host } from "./types";
 import type { MonitorView } from "./monitor-types";
@@ -48,6 +49,7 @@ const tabs = [
   "Servers",
   "Services",
   "Log Sources",
+  "Updates",
   "Notifications",
   "Data & History",
   "System Status",
@@ -129,11 +131,16 @@ function GeneralFields({
             })
           }
         >
-          {["overview", "servers", "services", "logs", "issues", "settings"].map(
-            (x) => (
-              <option key={x}>{x}</option>
-            ),
-          )}
+          {[
+            "overview",
+            "servers",
+            "services",
+            "logs",
+            "issues",
+            "settings",
+          ].map((x) => (
+            <option key={x}>{x}</option>
+          ))}
         </select>
       </label>
       <label className="check-label">
@@ -159,8 +166,24 @@ export function Settings({
   const display = useDisplay(),
     [personal, setPersonal] = useState(display),
     [scope, setScope] = useState("personal");
-  const [tab, setTab] = useState<(typeof tabs)[number]>(() => new URLSearchParams(location.hash.split("?")[1] ?? "").get("tab") === "servers" ? "Servers" : new URLSearchParams(location.hash.split("?")[1] ?? "").get("tab") === "logs" ? "Log Sources" : "General"),
-    [session, setSession] = useState<{ admin: boolean; configured: boolean; mode?: string }>(),
+  const [tab, setTab] = useState<(typeof tabs)[number]>(() =>
+      new URLSearchParams(location.hash.split("?")[1] ?? "").get("tab") ===
+      "updates"
+        ? "Updates"
+        : new URLSearchParams(location.hash.split("?")[1] ?? "").get("tab") ===
+            "servers"
+          ? "Servers"
+          : new URLSearchParams(location.hash.split("?")[1] ?? "").get(
+                "tab",
+              ) === "logs"
+            ? "Log Sources"
+            : "General",
+    ),
+    [session, setSession] = useState<{
+      admin: boolean;
+      configured: boolean;
+      mode?: string;
+    }>(),
     [config, setConfig] = useState<Config>(),
     [draft, setDraft] = useState<Values>(),
     [service, setService] = useState<Service | null>(),
@@ -232,7 +255,10 @@ export function Settings({
   }, [tab]);
 
   const [serverDirty, setServerDirty] = useState(false);
-  const onServerDirty = useCallback((value: boolean) => setServerDirty(value), []);
+  const onServerDirty = useCallback(
+    (value: boolean) => setServerDirty(value),
+    [],
+  );
   const dirty =
     serverDirty ||
     JSON.stringify(draft) !== JSON.stringify(config?.settings) ||
@@ -296,7 +322,8 @@ export function Settings({
     setPersonal(display);
     setService(undefined);
     setTab(t);
-    if (session?.admin && tab === "Servers" && t !== "Servers") void reload().catch(e => setFailure(e.message));
+    if (session?.admin && ["Servers", "Updates"].includes(tab) && t !== tab)
+      void reload().catch((e) => setFailure(e.message));
     setFailure("");
     setMessage("");
   }
@@ -365,7 +392,13 @@ export function Settings({
       <p className="detail-description">
         Personalize this browser or manage application configuration.
       </p>
-      {session?.mode === "local" && <p><a className="text-link" href="/auth/logout">Sign out</a></p>}
+      {session?.mode === "local" && (
+        <p>
+          <a className="text-link" href="/auth/logout">
+            Sign out
+          </a>
+        </p>
+      )}
       {!session?.admin && (
         <p className="notice">
           {session?.configured
@@ -382,10 +415,7 @@ export function Settings({
           </a>
         </p>
       ) : null}
-      <TabList
-        className="settings-tabs"
-        aria-label="Settings sections"
-      >
+      <TabList className="settings-tabs" aria-label="Settings sections">
         {tabs.map((t) => (
           <button
             role="tab"
@@ -848,8 +878,19 @@ export function Settings({
           )}
         </section>
       )}
-      {tab === "Servers" && <ServerSettings admin={!!session?.admin} hosts={hosts} onDirty={onServerDirty}/>}
-      {tab === "Log Sources" && <LogSettings hosts={hosts} data={data} admin={!!session?.admin}/>}
+      {tab === "Servers" && (
+        <ServerSettings
+          admin={!!session?.admin}
+          hosts={hosts}
+          onDirty={onServerDirty}
+        />
+      )}
+      {tab === "Updates" && (
+        <UpdateSettings admin={!!session?.admin} onDirty={onServerDirty} />
+      )}
+      {tab === "Log Sources" && (
+        <LogSettings hosts={hosts} data={data} admin={!!session?.admin} />
+      )}
       {tab === "Notifications" && (
         <>
           <OperationalStatus data={data} error={error} />

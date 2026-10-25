@@ -152,14 +152,27 @@ export function Containers({host,onInvestigate}:{host:Host;onInvestigate:(target
 export function Services({hosts,checks=[],onInvestigate}:{hosts:Host[];checks?:CheckView[];onInvestigate:(target:InvestigationTarget)=>void}) {
   const services=servicesFromHosts(hosts);
   const [filter,setFilter]=useState('');
+  const visible=services.filter(({host,container:c})=>`${host.name} ${c.name}`.toLowerCase().includes(filter.toLowerCase()));
   return <details className="services-panel"><summary>Container resources <span>{services.length} containers · expand to inspect</span></summary>
     <p className="detail-description">Container state, configured Docker health checks, and independent application availability are separate signals.</p>
     <input aria-label="Filter services" placeholder="Find an application or host…" value={filter} onChange={e=>setFilter(e.target.value)}/>
-    <div className="service-list">{services.filter(({host,container:c})=>`${host.name} ${c.name}`.toLowerCase().includes(filter.toLowerCase())).map(({host,container:c,availability})=><details key={host.id+c.name}><summary><b>{c.name}</b><span>{host.name}</span><span>{containerStatus(c,host.status==='online')}</span>{checks.filter(x=>x.hostId===host.id&&x.container===c.name).map(x=><span key={x.id} className={`check-state ${x.state}`}>{checkLabel(x)}</span>)}<span>{host.status==='online'?fmt(c.cpu):'—'}% · {host.status==='online'?fmt(c.memory):'—'} MiB</span></summary>
+    <div className="service-list">{visible.map(({id,host,container:c,availability})=>{
+      const online=host.status==='online';
+      const state=containerStatus(c,online);
+      const health=!online?'Health unknown':!c.health||c.health==='no_healthcheck'?'No health check':c.health.replaceAll('_',' ');
+      const relatedChecks=checks.filter(x=>x.hostId===host.id&&x.container===c.name);
+      return <details key={id} className="container-card" data-state={state}><summary>
+        <span className="container-card-heading"><b>{c.name}</b><span className="container-card-host">{host.name}</span></span>
+        <span className="container-card-status"><span className={`container-state ${state}`}>{state}</span><span className={`container-health ${online?c.health:''}`}>{health}</span></span>
+        <span className="container-card-metrics"><span><span>CPU</span><strong>{online?fmt(c.cpu):'—'}<small>%</small></strong></span><span><span>Memory</span><strong>{online?fmt(c.memory):'—'}<small>MiB</small></strong></span></span>
+        <span className="container-card-footer"><span className="container-card-availability">{relatedChecks.length?relatedChecks.map(x=><span key={x.id} className={`check-state ${x.state}`}>App: {checkLabel(x)}</span>):<span>App not checked</span>}</span><span className="container-card-toggle"><span className="when-closed">Details</span><span className="when-open">Close details</span></span></span>
+      </summary><div className="container-card-detail">
+      <p className="container-card-image">{c.image}</p>
       <p>Docker health check: {host.status!=='online'?'unknown':c.health==='no_healthcheck'?'not configured':c.health||'unknown'}. Application availability: {availability.state==='unchecked'?(checks.some(x=>x.hostId===host.id&&x.container===c.name)?'see independent check below':'not independently checked'):`${availability.state} (${availability.method}, ${availability.checkedAt})`}.</p>
-      {checks.filter(x=>x.hostId===host.id&&x.container===c.name).map(x=><p key={x.id}>Application availability: {checkLabel(x)} · {x.reason} · <a className="text-link" href={`#service=${x.id}`}>Check history →</a></p>)}
+      {relatedChecks.map(x=><p key={x.id}>Application availability: {checkLabel(x)} · {x.reason} · <a className="text-link" href={`#service=${x.id}`}>Check history →</a></p>)}
       <div className="context-actions"><button className="text-link" onClick={()=>onInvestigate({host,container:c})}>Investigate resources →</button><a className="action-link" href={logLink({hostId:host.id,container:c.name})}>View logs →</a><a className="text-link" href={`#host=${host.id}`}>Open host</a></div>
-    </details>)}</div>{!services.length&&<p className="muted">No Docker services are currently reported.</p>}
+      </div></details>;
+    })}</div>{!services.length?<p className="muted">No Docker services are currently reported.</p>:!visible.length&&<p className="muted" role="status">No containers match your search.</p>}
   </details>;
 }
 export function Alerts({hosts,onInvestigate}:{hosts:Host[];onInvestigate:(target:InvestigationTarget)=>void}) {
@@ -179,6 +192,7 @@ export function InvestigationDialog({target,onClose}:{target:InvestigationTarget
   const end=alert?.endedAt || (alert?.startedAt ? Math.min(Date.now()/1000,alert.startedAt+1800) : Date.now()/1000);
   const initialWindow=alert?.startedAt?{after:Math.floor(Math.max(alert.startedAt-900, end-31*86400+900)),before:Math.floor(Math.min(Date.now()/1000, Math.max(end+(!alert.endedAt?0:900),alert.startedAt+30)))}:undefined;
   return <dialog ref={ref} className="investigation-dialog" onCancel={onClose}><div className="dialog-heading"><div><h2>{alert?.summary||container?.name||'Metric investigation'}</h2><a className="text-link" href={`#host=${host.id}`} onClick={onClose}>{host.name} →</a></div><button autoFocus aria-label="Close investigation" onClick={onClose}>×</button></div>
+    {alert?.handling && <p className="notice">{alert.handling.mode}: {alert.handling.reason} · <a className="text-link" href="#issues?tab=handled" onClick={onClose}>View handling</a></p>}
     {alert&&<><div className="chart-statistics"><span>{alert.state} · {alert.severity}</span><span>{alert.resource}</span><span>{fmt(alert.value)} {alert.units}{alert.resolved?' before clearing':''}</span></div><p className="detail-description">{alert.info}</p><p>Started / state changed: {date(alert.startedAt)} · {alert.resolved?`resolved ${date(alert.endedAt)}`:'active'} · duration {duration(alert.duration??(alert.startedAt?Date.now()/1000-alert.startedAt:null))}</p><p className="detail-description">Warning rule: {alert.warning||'Unavailable'}<br/>Critical rule: {alert.critical||'Unavailable'}</p><p className="detail-description">Rules are Netdata expressions. Chart dimensions may differ from the alert’s calculated or rolling value.</p></>}
     {container&&<p className="detail-description">{containerStatus(container,host.status==='online')} · Docker check: {container.health||'unknown'} · See Services for configured application availability checks. CPU 100% = one core; memory in MiB. Network in kilobits/s, disk in KiB/s.</p>}
     <p><a className="action-link" onClick={onClose} href={logLink({hostId:host.id,container:container?.name}, initialWindow ? {after:new Date(initialWindow.after*1000).toISOString(),before:new Date(Math.min(initialWindow.before,initialWindow.after+86400)*1000).toISOString()}:undefined, "logs", alert?.id)}>{alert ? "View related logs" : "View logs"} →</a></p>

@@ -98,3 +98,5 @@ Hostboard is **AGPL-3.0-only**; see [LICENSE](LICENSE). If you modify and provid
 ### Server management
 
 Administrators can add, test, rename, disable, archive and group existing Netdata Agents in Settings → Servers. Discovery pins physical node identity and reports available metrics and host metadata. Deployment-owned destination policy remains separate from the registry. See [server connections, approval and migration](docs/servers.md).
+
+Read-only [Update Monitor](docs/updates.md) shows APT package/security candidates, reboot flags and Compose image digest changes. Optional scheduled host snapshots keep package-manager and Docker permissions out of the web application.

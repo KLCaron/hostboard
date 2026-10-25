@@ -1,0 +1,16 @@
+{
+  "hostId": "server-a",
+  "nodeGuid": "REPLACE-WITH-REGISTERED-NETDATA-GUID",
+  "staleSeconds": 86400,
+  "registries": {
+    "registry-1.docker.io": {
+      "tokenRealms": [
+        "https://auth.docker.io/token"
+      ],
+      "blobRedirectHosts": [
+        "production.cloudfront.docker.com",
+        "production.cloudflare.docker.com"
+      ]
+    }
+  }
+}
