@@ -46,6 +46,8 @@ Use [smtp.example.json](../config/smtp.example.json). `host`, `port` (465 or 587
 
 `PORT` / `HOSTBOARD_BIND` control direct Node/host-network listeners (default 3001 / 127.0.0.1); bridge Compose deliberately sets internal port 8088 and wildcard bind. `HOSTBOARD_CONTAINER=1` allows the internal wildcard. `HOSTBOARD_CONFIG`, `HOSTBOARD_CHECKS`, `HOSTBOARD_DB`, `HOSTBOARD_ADMIN_CONFIG`, and `HOSTBOARD_SMTP_CONFIG` select file paths. `HOSTBOARD_PUBLIC_URL` is used in notification links, not as an authentication trust source. Changing it does not change the required admin Origin. Production image metadata is in `/app/package.json` and OCI labels.
 
+`HOSTBOARD_AGENT_POLICY`, `HOSTBOARD_LOG_CONFIG`, and `HOSTBOARD_UPDATE_CONFIG` optionally override the Agent-policy, log-reader, and update-reader file paths. Log/update keys and pinned host keys remain in the respective `logs/` or `updates/` directory beside that configuration file. The default Compose private-directory mount already supports the standard paths in the table; alternate paths must be mounted and explicitly passed into the container.
+
 Settings defaults: 10-second refresh, Celsius, 1-hour historical window, Overview landing page, 30-day service samples and indefinite incident retention. Netdata supplies metric retention. Personal preferences/layouts remain browser-local; server backups do not include browser storage.
 
 Server registrations and primary groups are persisted in schema-4 SQLite. `config/hosts.json` is now a one-time bootstrap and compatibility trust source; later edits do not overwrite the registry. Agent origins and pinned IP approval remain operator-controlled in optional `private/agents.json`. See [server management](servers.md).
