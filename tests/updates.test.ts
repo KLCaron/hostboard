@@ -82,8 +82,8 @@ function fixture(t: test.TestContext) {
     set: (s: unknown) => {
       value = s;
     },
-    fail: () => {
-      fail = true;
+    fail: (state = true) => {
+      fail = state;
     },
     get calls() {
       return calls;
@@ -157,6 +157,38 @@ test("failure keeps last observation and last success, is visibly stale, isolate
   assert(!h.error!.includes("secret"));
   assert.equal(await f.updates.refresh("other"), false);
   assert.equal(f.updates.view()[1].snapshot, null);
+});
+test("failed reads retry every five minutes across restarts and resume the normal interval after recovery", async (t) => {
+  const f = fixture(t);
+  t.mock.method(Date, "now", () => f.now * 1000);
+  f.records[1].enabled = false;
+  await f.updates.refresh("host");
+  f.fail();
+  f.advance(f.config.intervalSeconds);
+  await f.updates.tick();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.calls, 2);
+  assert.ok(f.updates.view()[0].error);
+  const restarted = new Updates(f.store, () => f.records, f.config, f.provider, () => f.now);
+  t.after(() => restarted.stop());
+  f.advance(299);
+  await restarted.tick();
+  assert.equal(f.calls, 2, 'restart does not cause an immediate retry storm');
+  f.advance(1);
+  await restarted.tick();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.calls, 3);
+  assert.ok(restarted.view()[0].error);
+  f.fail(false);
+  f.set(updateSample("host", f.now));
+  f.advance(300);
+  await restarted.tick();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.calls, 4);
+  assert.equal(restarted.view()[0].error, null);
+  f.advance(300);
+  await restarted.tick();
+  assert.equal(f.calls, 4, 'successful reads keep the configured six-hour interval');
 });
 test("partial category and registry results remain available, with last successful times retained", async (t) => {
   const f = fixture(t);

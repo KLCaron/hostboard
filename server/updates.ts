@@ -647,11 +647,17 @@ export class Updates {
       }
       if (!this.config.hosts.some((c) => c.hostId === h.id)) continue;
       const row = this.store.db
-        .prepare("SELECT lastAttemptAt FROM update_snapshots WHERE hostId=?")
-        .get(h.id) as { lastAttemptAt: number } | undefined;
+        .prepare("SELECT lastAttemptAt,error FROM update_snapshots WHERE hostId=?")
+        .get(h.id) as { lastAttemptAt: number; error: string | null } | undefined;
+      // A failed SSH read during a reboot must not leave recovered hosts in an
+      // error state for the full inventory interval (six hours by default).
+      // Retry only snapshot reads; collection remains owned by the host timer.
+      const interval = row?.error
+        ? Math.min(this.preferences().intervalSeconds, 300)
+        : this.preferences().intervalSeconds;
       if (
         !row ||
-        this.clock() - row.lastAttemptAt >= this.preferences().intervalSeconds
+        this.clock() - row.lastAttemptAt >= interval
       )
         void this.refresh(h.id);
     }

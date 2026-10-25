@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import { Agent, latest, parseTable, ratio, sum, type Table } from '../server/netdata.js';
 import { ConfigSchema, privateBind } from '../server/config.js';
+import { AgentTrust } from '../server/agent-policy.js';
 
 test('missing and invalid metrics stay missing; zero remains a real value', () => {
   assert.equal(sum([0, 0]), 0);
@@ -188,4 +189,63 @@ test('unreachable Agents return an explicit offline host with no invented values
   assert.equal(host.memory.used, null);
   assert.equal(host.alerts, null);
   assert.equal(host.lastSeen, null);
+});
+
+test('parent reachability and retained samples cannot make a disconnected child live; missing metrics remain stale', async t => {
+  let now = Date.now();
+  t.mock.method(Date, 'now', () => now);
+  let state = 'reachable', fresh = true, dataCalls = 0;
+  const server = http.createServer((req, res) => {
+    const u = new URL(req.url!, 'http://fixture');
+    let body: unknown;
+    if (u.pathname.endsWith('/nodes')) body = {nodes: [
+      {mg: 'parent-guid', nm: 'parent', state: 'reachable'},
+      {mg: 'child-guid', nm: 'child', state, hw: {cpus: '8'}},
+    ]};
+    else if (u.pathname.endsWith('/charts')) body = {hostname: 'child', charts: {
+      cpu: {id: 'cpu', context: 'system.cpu', family: '', units: '', chart_labels: {}},
+    }};
+    else if (u.pathname.endsWith('/contexts')) body = {contexts: {'system.cpu': {}}};
+    else if (u.pathname.endsWith('/alerts')) body = {alerts: []};
+    else {
+      dataCalls++;
+      assert.equal(u.searchParams.get('nodes'), 'child-guid');
+      body = {summary: {nodes: [{mg: 'child-guid'}]}, result: {
+        labels: ['time', 'user'], data: [[now / 1000 - (fresh ? 1 : 120), 12]],
+      }, view: {dimensions: {ids: ['user,cpu@child']}}};
+    }
+    res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(body));
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => server.close());
+  const url = `http://127.0.0.1:${(server.address() as {port: number}).port}`;
+  const agent = new Agent({id: 'child', name: 'Child', node: 'child-guid', url},
+    new AgentTrust([{url, addresses: ['127.0.0.1']}]));
+  const poll = async () => {now += 9000; return agent.current();};
+  const online = await poll();
+  assert.equal(online.status, 'online');
+  assert.equal(online.cpu, 12);
+  for (state of ['stale', 'unreachable', 'offline', 'pruned', 'created']) {
+    const before = dataCalls, host = await poll();
+    assert.equal(host.status, 'offline', state);
+    assert.equal(host.hostname, 'child');
+    assert.equal(host.cores, 8);
+    assert.equal(host.cpu, null);
+    assert.equal(host.memory.used, null);
+    assert.equal(host.alerts, null);
+    assert.equal(host.dockerAvailable, false);
+    assert.equal(host.lastSeen, online.lastSeen);
+    assert.match(host.error!, /no active Agent or streaming connection/);
+    assert.equal(dataCalls, before, 'retained metrics must not be queried as live data');
+  }
+  state = 'reachable'; fresh = false;
+  const delayed = await poll();
+  assert.equal(delayed.status, 'stale');
+  assert.equal(delayed.cpu, null);
+  assert.equal(delayed.lastSeen, online.lastSeen);
+  assert.match(delayed.error!, /Agent is reachable/);
+  state = 'unknown'; fresh = true;
+  assert.equal((await poll()).status, 'stale');
+  state = 'reachable';
+  assert.equal((await poll()).status, 'online', 'reconnect recovers without invalidation');
 });
