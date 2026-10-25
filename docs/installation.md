@@ -1,6 +1,8 @@
 # Installation
 
-Use the [README quick start](../README.md) for a new installation. The published image includes the setup CLI and database initialization; no private files, build tools, external database, Netdata Cloud account, or Cloudflare account are required.
+Choose the version before setting up a new installation. The [README published-release instructions](../README.md#published-release-installation) install v0.7.1. The `main` branch currently describes 0.9.0, including features and dependency fixes not yet in a published release; use [Build from source](#build-from-source) for that code. A source version or default image reference does not establish that its image has been published.
+
+Both published and locally built images include the setup CLI and database initialization. Running them requires Linux, Git, Docker Engine and Compose v2; no host Node.js runtime, external database, Netdata Cloud account, or Cloudflare account is required. The backup/upgrade helper additionally needs host Python 3.
 
 ## Setup
 
@@ -18,7 +20,7 @@ For manual setup, copy `.env.example` and `config/hosts.example.json`, create an
 
 The `scripts/setup.sh` wrapper mounts only the project directory. Use `./data` or another directory **inside the project** with that wrapper. An absolute host directory must also be mounted into the setup container at the same path; otherwise setup cannot prepare the host's storage or its permissions.
 
-For a fresh installation using external storage, run this instead of `scripts/setup.sh`:
+For a fresh v0.7.1 release installation using external storage, run this instead of `scripts/setup.sh`:
 
 ```sh
 DATA_DIR="$HOME/hostboard-data"
@@ -29,6 +31,8 @@ docker run --rm -it --user "$(id -u):$(id -g)" \
 ```
 
 Enter the exact absolute value of `DATA_DIR` at the persistent data directory prompt. Then run `./scripts/setup.sh --check` and `docker compose up -d --wait` normally. Use a path without spaces or shell syntax. This flow was verified with external SQLite storage, an unavailable Agent, and container recreation. Existing installations should stop Hostboard and retain a consistent backup before moving data or changing `HOSTBOARD_DATA_DIR`.
+
+For a local source build, replace the image in that `docker run` command with your built tag, persist the same tag in `.env`, and supply `HOSTBOARD_IMAGE` to the wrapper's `--check` command as described below.
 
 ## HTTPS proxy
 
@@ -48,12 +52,22 @@ The container must become healthy. Sign in, check that your server appears onlin
 
 ## Build from source
 
+For a fresh installation of current `main`:
+
 ```sh
+git clone https://github.com/KLCaron/hostboard.git
+cd hostboard
 docker build -t hostboard:local .
 HOSTBOARD_IMAGE=hostboard:local ./scripts/setup.sh
+# Setup writes the source version's registry reference; keep using your local image:
+sed -i 's|^HOSTBOARD_IMAGE=.*|HOSTBOARD_IMAGE=hostboard:local|' .env
+HOSTBOARD_IMAGE=hostboard:local ./scripts/setup.sh --check
+docker compose up -d --wait
 ```
 
-Set `HOSTBOARD_IMAGE=hostboard:local` in the generated `.env` before `docker compose up -d --wait`. Published images avoid this build step. Architecture support is Linux amd64/arm64; Docker Desktop and other operating systems are not part of the release acceptance matrix.
+The explicit image override is needed for both setup commands: the wrapper does not read `.env` to select its setup image. Compose reads the persisted `HOSTBOARD_IMAGE` from `.env`. Use the same private Agent addressing and browser-origin rules as a published installation. Building needs network access and more resources than running the application; no host npm installation is needed.
+
+These commands are for a fresh directory. For an existing deployment, retain a paired image/configuration/database backup and the old local image before building a new, distinct image tag and changing `.env`; see [locally built image upgrades](operations.md#locally-built-images). Do not rerun setup over existing files. Published releases avoid the build step. Architecture support is Linux amd64/arm64; Docker Desktop and other operating systems are not part of the release acceptance matrix.
 
 ## Independent watchdog and authentication
 

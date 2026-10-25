@@ -1,6 +1,6 @@
 # Container logs and incident investigation
 
-Hostboard v0.6 optionally reads existing **Docker-managed stdout/stderr** on approved hosts. It does not collect or retain log bodies, change Docker logging settings, require Netdata Cloud, or add a log database. A normal Compose installation needs no log configuration and retains its monitoring features.
+Hostboard optionally reads existing **Docker-managed stdout/stderr** on approved hosts. It does not collect or retain log bodies, change Docker logging settings, require Netdata Cloud, or add a log database. A normal Compose installation needs no log configuration and retains its monitoring features.
 
 ## Workflow
 
@@ -24,6 +24,8 @@ The helper permits only a bounded JSON `sources` or `query` request. Its only Do
 Python standard-library parsing, fixed paths/methods, strict schemas, pinned SSH identity, process CPU/address-space/fd/core limits, per-host file-lock admission and deadlines reduce attack surface; they are not a formal security audit. Review changes before upgrading the adapter. Removing a source from the host allowlist revokes it even if a browser mapping still exists.
 
 ## Optional setup on one or more hosts
+
+Netdata discovering a new container does not grant log access. Add an exact source selector to that host's root-managed allowlist and associate it with the container or service in **Settings → Log Sources**. Compose project/service/replica selectors survive normal container replacement; a full container-ID selector must be reviewed when the container is replaced. Keep existing approvals when extending the allowlist.
 
 Requires a Linux Docker host with Python 3, OpenSSH server, systemd, and its `docker` socket group. The installation helper targets Debian/Ubuntu’s `ssh.service`; adapt the service name on other distributions after review. Run this only on hosts whose administrator accepts the socket privilege above. It never restarts Docker or application containers.
 
@@ -61,7 +63,7 @@ Requires a Linux Docker host with Python 3, OpenSSH server, systemd, and its `do
 
    Arbitrary commands, SFTP, forwarding and unapproved sources must fail. If a source is missing or unavailable, inspect the allowlist/unique labels, pinned host key, file ownership, `from=` source IP and Docker logging capability. Hostboard reports errors instead of fabricating entries.
 
-Use `HOSTBOARD_LOG_CONFIG` only for an alternate deployment-owned configuration path; the `logs/` key directory is next to that file. Avoid Docker/SSH secrets in environment variables. Back up the private directory along with the database and paired image using the existing recovery process. Mappings and audit rows are additive SQLite metadata compatible with the v0.5.3 schema; no monitoring schema migration or metric/history transformation is needed. Restore a paired checkpoint for a full rollback. To disable the feature, remove its private configuration and recreate Hostboard; revoke the authorized key/account on each host. Preserve older backup keys securely or revoke them too.
+Use `HOSTBOARD_LOG_CONFIG` only for an alternate deployment-owned configuration path; the `logs/` key directory is next to that file. Avoid Docker/SSH secrets in environment variables. Back up the private directory along with the database and paired image using the existing recovery process. Log mappings and audit rows are additive metadata; enabling logs does not transform observations or Netdata history. The current application uses schema 4, which older releases may refuse; restore the matching paired image/configuration/database checkpoint for rollback. To disable the feature, remove its private configuration and recreate Hostboard; revoke the authorized key/account on each host. Preserve older backup keys securely or revoke them too.
 
 ## Bounds and honest limitations
 

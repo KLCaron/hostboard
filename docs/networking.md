@@ -27,7 +27,7 @@ Agent credentials belong in an explicitly passed environment variable referenced
 
 ## DNS
 
-Service-check policy names and port numbers must match exactly, and every DNS answer must be in the approved IP list. Agent hostnames are pinned to their first resolved address set for the process lifetime, or to optional `addresses` in the host entry. Every connection verifies current DNS answers against that set and connects to the validated address while retaining HTTP Host/TLS SNI. Use explicit Agent `addresses` for approvals that should survive restarts. After an intentional DNS/IP change, update approved addresses and recreate Hostboard. Link-local/metadata, multicast, unspecified and mapped IPv6 destinations are rejected; explicit private/loopback monitoring remains supported.
+Service-check policy names and port numbers must match exactly, and every DNS answer must be in the approved IP list. Explicit Agent approval comes from `private/agents.json`. Without that file, bootstrap `hosts.json` origins supply compatibility grants: literal IPs or `addresses` are used directly, and legacy DNS names are resolved and pinned once at startup. A failed startup lookup stays denied until restart. Every connection verifies current DNS answers against the approved set and connects to the validated address while retaining HTTP Host/TLS SNI. Use explicit Agent `addresses` for durable approval. After an intentional DNS/IP change, update approved addresses and recreate Hostboard, then retest any changed registered origin in Settings. Link-local/metadata, multicast, unspecified and mapped IPv6 destinations are rejected; explicit private/loopback monitoring remains supported.
 
 ## Service endpoints that survive Docker restarts
 

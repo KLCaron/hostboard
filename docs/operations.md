@@ -4,6 +4,8 @@
 
 Stable release image: `ghcr.io/klcaron/hostboard:0.7.1`, Linux amd64/arm64. Each `vX.Y.Z` Git tag must match `package.json`. Publishing runs tests before building, and refuses an existing version tag. Do not move Git tags or republish an existing version. GHCR allows administrators to change tags, so use the published **sha256 manifest digest** for immutable deployments. The GitHub Release records that digest; build metadata/SBOM/provenance are attached to the image. No moving `latest` tag is published. Maintainers may dispatch a verified `candidate-<commit>` image for pre-release acceptance; it is not a stable release. Only reviewed stable semantic versions are released.
 
+The current `main` source version is 0.9.0. Its Update Monitor, issue handling, container cards, and newer dependency fixes are not part of the v0.7.1 image. Use a [local source build](installation.md#build-from-source) for those changes until a new release is published. The guides on `main` describe that code; use a release checkout's own guides for its image. Do not select an image based only on the source version or `.env.example` default.
+
 `v0.6.0` remains an early candidate Git tag; no stable v0.6.0 image or GitHub Release was published. v0.6.1 established the centralized Logs explorer; v0.6.2 adds consistent navigation, contextual links and interaction states across all six sections. It keeps schema 3, the existing source identities, log query bounds and adapter privileges unchanged.
 
 Use `HOSTBOARD_IMAGE=ghcr.io/klcaron/hostboard@sha256:...` in `.env` to pin the complete multi-platform release. Keep a copy of the selected source release alongside your deployment files to satisfy source availability and recover the matching helpers. No automatic updater is installed.
@@ -27,6 +29,10 @@ v0.5.2 migrates schema **1 → 2** transactionally, preserving observations as e
 
 v0.5.3 adds schema **2 → 3** in an ordered transaction. It adds historical target metadata without rebuilding observations. Existing generations remain explicitly `legacy-unavailable`: current configuration cannot prove their original definitions. Fresh generations retain sanitized metadata. Both schema-1 and actual schema-2 release fixtures are tested. v0.5.2 refuses schema 3; an image-only downgrade is unsupported. Restore its schema-2 pre-upgrade checkpoint, matching private/configuration files and saved image together.
 
+## Locally built images
+
+`scripts/manage.sh upgrade` pulls its selected image and is intended for registry images. For a locally built deployment, make the same paired backup before changing code or configuration and keep the saved image available locally. Build the new source under a distinct local image tag, set that tag as `HOSTBOARD_IMAGE` in `.env`, and recreate only Hostboard with `docker compose up -d --wait --wait-timeout 120 hostboard`. Verify fresh metrics and administrator access. Keep the previous image until the new build is accepted; the paired rollback helper can restore its saved local image ID. Reusing a tag without preserving its old image can remove that recovery path.
+
 ## Paired restore
 
 ```sh
@@ -43,7 +49,7 @@ docker compose run --rm --no-deps -T --entrypoint node hostboard dist/server/ser
 docker compose up -d --wait
 ```
 
-The v0.5.3 offline command accepts schemas 1, 2 and 3. Use the saved v0.5.1 image only with its schema-1 checkpoint. For an older release without the maintenance CLI, use its matching restore instructions and paired pre-upgrade database. Never delete WAL files from a running database. Do not run restore while another Hostboard process has the same data directory open.
+The v0.7.1 and current `main` maintenance commands accept schemas 1–4; older commands may accept fewer. Select the saved image that matches the checkpoint, rather than relying on a newer validator's range to establish application compatibility. For an older release without the maintenance CLI, use its matching restore instructions and paired pre-upgrade database. Never delete WAL files from a running database. Do not run restore while another Hostboard process has the same data directory open.
 
 ## Existing SSH / host-network deployments
 
