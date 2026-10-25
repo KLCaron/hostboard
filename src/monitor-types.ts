@@ -1,5 +1,6 @@
 export type CheckState = 'up' | 'down' | 'pending' | 'unknown' | 'disabled';
 export interface CheckView {
+  handling?: import('./issue-handling-types.js').IssueHandling;
   generation?: number;
   id: string; name: string; hostId: string; container?: string; type: 'http' | 'tcp';
   group?: 'Applications' | 'Infrastructure'; lastSuccessfulAt?: number | null;
@@ -11,6 +12,8 @@ export interface CheckView {
 }
 export interface NotificationView { id: number; event: string; state: string; attempts: number; lastAttempt: number | null; deliveredAt: number | null; error: string | null }
 export interface IncidentView {
+  generation?: number;
+  handling?: import('./issue-handling-types.js').IssueHandling;
   id: number; checkId: string; name: string; hostId: string; severity: string;
   startedAt: number; detectedAt: number; endedAt: number | null; reason: string; lastReason: string;
   responseMs: number | null; resolution: string | null; monitoringGap: boolean;

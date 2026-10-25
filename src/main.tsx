@@ -276,10 +276,16 @@ function HostCard({
           {live ? uptime(host.uptime) : "Live metrics unavailable"}
         </span>
         {alerts != null && alerts > 0 ? (
-          <span className="warning-text">
-            <Bell size={13} />
+          <a
+            className="text-link warning-text"
+            href={`#issues?type=metric&host=${encodeURIComponent(host.id)}`}
+            aria-label={`View ${alerts} ${alerts === 1 ? "alert" : "alerts"} for ${host.name}`}
+          >
+            <Bell size={13} aria-hidden="true" />
             {alerts} {alerts === 1 ? "alert" : "alerts"}
-          </span>
+          </a>
+        ) : host.handledAlerts ? (
+          <a className="text-link" href={`#issues?tab=handled&type=metric&host=${encodeURIComponent(host.id)}`}>{host.handledAlerts} handled {host.handledAlerts === 1 ? 'alert' : 'alerts'}</a>
         ) : (
           <span className="muted">{host.hostname}</span>
         )}
@@ -566,6 +572,11 @@ function App() {
     }
   }, [display.landing]);
   const [target, setTarget] = useState<InvestigationTarget | null>(null);
+  useEffect(() => {
+    const changed = () => setRefresh(v => v + 1);
+    window.addEventListener('hostboard:issues', changed);
+    return () => window.removeEventListener('hostboard:issues', changed);
+  }, []);
   useEffect(() => {
     const link = () => {
       const route = resolveNavigation(location.hash, location.pathname);

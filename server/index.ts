@@ -21,6 +21,8 @@ import { loadAdmin } from "./admin.js";
 import { rateLimit } from "express-rate-limit";
 import { localAuthentication } from "./local-auth.js";
 import { configAPI, synchronize } from "./config-api.js";
+import { IssueHandlingStore, issueHandlingAPI } from './issue-handling.js';
+import type { IncidentView } from '../src/monitor-types.js';
 process.umask(0o077);
 const admin = loadAdmin();
 if (!admin)
@@ -39,6 +41,11 @@ const monitor = new Monitor(
   smtpDelivery(() => configuration.settings().notifications),
 );
 const registry = new Servers(configuration, await loadAgentTrust(bootstrap), bootstrap);
+const handling = new IssueHandlingStore(configuration, id => registry.records().find(h => h.id === id)?.guid || null);
+monitor.issueMuted = id => {
+  const incident = configuration.db.prepare('SELECT * FROM incidents WHERE id=?').get(id) as unknown as IncidentView | undefined;
+  return !!incident && !!handling.matching(handling.incident(incident));
+};
 const updateConfig = loadUpdateConfig(registry.ids());
 const updates = new Updates(
   configuration, () => registry.records(), updateConfig, new SSHUpdateProvider(updateConfig),
@@ -97,6 +104,7 @@ app.use(
 app.use("/api/admin/updates", updatesAPI(updates, admin));
 app.use("/api/admin/servers", registry.api(admin));
 app.use("/api/admin/logs", logsAPI(configuration, monitor, admin, () => registry.ids(), new SSHLogProvider(logConfig)));
+app.use('/api', issueHandlingAPI(handling, registry, monitor, admin));
 app.get("/api/system", async (_req, res) => {
   const hosts = await registry.fleet();
   const view = monitor.view(undefined, undefined, false);
@@ -143,10 +151,10 @@ app.get("/api/monitor", async (req, res) => {
     return;
   }
   res.json(
-    await monitor.viewAsync(
+    handling.monitor(await monitor.viewAsync(
       undefined,
       before === undefined ? undefined : Number(before),
-    ),
+    )),
   );
 });
 // Authenticated in local mode, behind Access in Cloudflare mode, like other history reads.
@@ -176,11 +184,11 @@ app.get("/api/incidents/:id", async (req, res) => {
     res.status(404).json({ error: "Unknown incident" });
     return;
   }
-  res.json(incident);
+  res.json({...incident, handling: handling.matching(handling.incident(incident))});
 });
 app.get("/api/fleet", async (_req, res) =>
   res.json({
-    hosts: await registry.fleet(),
+    hosts: await Promise.all((await registry.fleet()).map(h => handling.host(h, () => registry.agent(h.id)!.alertDetails()))),
     groups: registry.groups(),
     generatedAt: new Date().toISOString(),
     refreshSeconds: 10,
@@ -243,7 +251,7 @@ for (const endpoint of [
     try {
       if (endpoint === "metrics") res.json(await agent.catalog());
       else if (endpoint === "diagnostics") res.json(await agent.diagnostics());
-      else if (endpoint === "alerts") res.json(await agent.alertDetails());
+      else if (endpoint === "alerts") res.json(handling.alerts(req.params.id, await agent.alertDetails()));
       else {
         if (!(await agent.catalog()).some((c) => c.id === req.query.chart)) {
           res

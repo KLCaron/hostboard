@@ -1000,6 +1000,12 @@ td small {
 .warning-text {
   color: #d5b17c !important;
 }
+.modal.issue-action-dialog { position: fixed; inset: 0; margin: auto; height: fit-content; width: min(560px, calc(100vw - 32px)); max-width: 560px; max-height: calc(100dvh - 32px); overflow-y: auto; color: #d2d9e1; }
+.issue-action-dialog::backdrop { background: #000b; }
+.issue-action-dialog label { display: grid; gap: 6px; margin-block: 14px; }
+.issue-action-dialog select, .issue-action-dialog textarea { width: 100%; }
+.issue-action-dialog textarea { min-height: 90px; resize: vertical; background: #12161d; border: 1px solid #39424b; border-radius: 7px; padding: 10px; color: #d4dae1; font: inherit; }
+.issue-record > .text-link + .text-link { margin-left: 16px; }
 .empty-chart {
   height: 130px;
   display: flex;

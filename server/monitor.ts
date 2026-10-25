@@ -41,6 +41,7 @@ type History = Pick<CheckView, "summary" | "trend" | "lastSuccessfulAt">;
 const seconds = () => Date.now() / 1000;
 const iso = (time: number) => new Date(time * 1000).toISOString();
 export class Monitor {
+  issueMuted?: (incident: number) => boolean;
   readonly db: DatabaseSync;
   private readonly namespace: string;
   private timer?: ReturnType<typeof setInterval>;
@@ -455,6 +456,7 @@ export class Monitor {
       (event !== "recovery" ||
         (this.preferences?.notifications.recovery ?? true)) &&
       check.notify &&
+      !this.issueMuted?.(incident) &&
       !(
         this.config.minimumSeverity === "critical" &&
         check.severity !== "critical"
@@ -518,6 +520,7 @@ export class Monitor {
               (c) => c.id === target.checkId,
             );
             if (
+              this.issueMuted?.(row.incident) ||
               this.disabled.has(target.checkId) ||
               !definition?.notify ||
               this.preferences?.notifications.enabled === false ||
